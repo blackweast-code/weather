@@ -75,10 +75,11 @@ export default function Home() {
   const [weather, setWeather] = useState<WeatherData | null>(null);
   const [error, setError] = useState("");
   const [label, setLabel] = useState("내 휴대폰 위치");
+  const [adminToken, setAdminToken] = useState("");
   const [saveState, setSaveState] = useState<SaveState>({
     status: "idle",
     message:
-      "페이지가 열리면 자동으로 위치 권한을 요청합니다. 허용하면 이 휴대폰 위치 기준으로 날씨가 갱신됩니다.",
+      "관리자 토큰을 저장한 휴대폰에서만 자동 위치 수집이 실행됩니다. 일반 방문자는 보기만 가능합니다.",
   });
   const autoRequested = useRef(false);
 
@@ -100,11 +101,13 @@ export default function Home() {
     latitude: number,
     longitude: number,
     locationLabel: string,
+    updateToken: string,
   ) {
     const response = await fetch("/api/location", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
+        "x-location-update-token": updateToken,
       },
       body: JSON.stringify({
         label: locationLabel,
@@ -119,7 +122,21 @@ export default function Home() {
     }
   }
 
-  function collectPhoneLocation(mode: "auto" | "manual" = "manual") {
+  function collectPhoneLocation(
+    mode: "auto" | "manual" = "manual",
+    tokenOverride?: string,
+  ) {
+    const updateToken = (tokenOverride ?? adminToken).trim();
+
+    if (!updateToken) {
+      setSaveState({
+        status: "idle",
+        message:
+          "공개 방문자는 위치를 바꿀 수 없습니다. 관리자 토큰을 입력하면 이 휴대폰 위치를 자동으로 저장합니다.",
+      });
+      return;
+    }
+
     if (!navigator.geolocation) {
       setSaveState({
         status: "error",
@@ -144,7 +161,9 @@ export default function Home() {
             position.coords.latitude,
             position.coords.longitude,
             locationLabel,
+            updateToken,
           );
+          window.localStorage.setItem("locationUpdateToken", updateToken);
           await loadWeather();
           setSaveState({
             status: "success",
@@ -175,6 +194,9 @@ export default function Home() {
   }
 
   useEffect(() => {
+    const storedToken = window.localStorage.getItem("locationUpdateToken") ?? "";
+    setAdminToken(storedToken);
+
     loadWeather()
       .catch((loadError) => {
         setError(
@@ -184,9 +206,15 @@ export default function Home() {
         );
       })
       .finally(() => {
-        if (!autoRequested.current) {
+        if (storedToken && !autoRequested.current) {
           autoRequested.current = true;
-          collectPhoneLocation("auto");
+          collectPhoneLocation("auto", storedToken);
+        } else if (!storedToken) {
+          setSaveState({
+            status: "idle",
+            message:
+              "공개 열람 모드입니다. 관리자 토큰을 입력하면 이 휴대폰 위치를 자동으로 저장할 수 있습니다.",
+          });
         }
       });
     // This should run only once on page entry so the browser permission prompt
@@ -273,14 +301,22 @@ export default function Home() {
       <section className="location-band card" aria-label="자동 위치 설정">
         <div>
           <p className="section-kicker">Auto Location</p>
-          <h2>휴대폰 위치를 자동으로 수집합니다</h2>
+          <h2>관리자 휴대폰 위치를 자동으로 수집합니다</h2>
           <p>
-            브라우저 정책상 위치는 권한 허용 후에만 읽을 수 있습니다. 이 링크를
-            카카오톡 받을 휴대폰에서 열면 자동으로 위치 권한을 요청하고, 허용된
-            좌표로 날씨를 다시 계산합니다.
+            공개 링크는 누구나 볼 수 있지만 위치 변경은 관리자 토큰이 있는
+            브라우저에서만 가능합니다. 관리자 토큰을 저장한 휴대폰에서 열면
+            자동으로 위치 권한을 요청하고, 허용된 좌표로 날씨를 다시 계산합니다.
           </p>
         </div>
         <div className="location-controls">
+          <input
+            aria-label="관리자 토큰"
+            className="text-input"
+            onChange={(event) => setAdminToken(event.target.value)}
+            placeholder="관리자 위치 저장 토큰"
+            type="password"
+            value={adminToken}
+          />
           <input
             aria-label="위치 이름"
             className="text-input"
@@ -289,7 +325,7 @@ export default function Home() {
             value={label}
           />
           <button onClick={() => collectPhoneLocation("manual")} type="button">
-            위치 다시 수집
+            관리자 위치 저장
           </button>
           <p className={`send-result ${saveState.status}`}>
             {saveState.message}
