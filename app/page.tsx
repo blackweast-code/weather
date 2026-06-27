@@ -1,9 +1,7 @@
 "use client";
 
 import type { CSSProperties } from "react";
-import { useEffect, useMemo, useState } from "react";
-
-type ScenarioKey = "need" | "recommend" | "clear";
+import { useEffect, useState } from "react";
 
 type ForecastSlot = {
   time: string;
@@ -14,258 +12,207 @@ type ForecastSlot = {
   sky: string;
 };
 
-type Scenario = {
-  label: string;
-  decision: string;
-  level: number;
-  summary: string;
-  detail: string;
-  region: string;
+type WeatherData = {
+  location: {
+    label: string;
+    latitude: number;
+    longitude: number;
+    updatedAt: string;
+    source: "saved" | "default";
+  };
   baseTime: string;
   high: number;
   low: number;
-  kakaoStatus: string;
-  message: string;
-  reasons: string[];
+  maxPop: number;
   forecast: ForecastSlot[];
+  decision: {
+    key: "need" | "recommend" | "clear";
+    label: string;
+    title: string;
+    level: number;
+    summary: string;
+    detail: string;
+    reasons: string[];
+    message: string;
+  };
 };
 
-type KakaoConfigStatus = {
-  restApiKey: boolean;
-  redirectUri: boolean;
-  refreshToken: boolean;
-  authReady: boolean;
-  sendReady: boolean;
-};
-
-type SendState = {
-  status: "idle" | "sending" | "success" | "error";
+type SaveState = {
+  status: "idle" | "saving" | "success" | "error";
   message: string;
 };
 
-const scenarios: Record<ScenarioKey, Scenario> = {
-  need: {
-    label: "필요",
-    decision: "우산 필요",
-    level: 3,
-    summary: "오후 3시 이후 비 예보가 있어 우산이 필요합니다.",
-    detail:
-      "강수확률 60% 이상 시간대가 있고, 퇴근 시간대 강수 가능성이 높아 보수적으로 필요로 판단했습니다.",
-    region: "서울 성동구",
-    baseTime: "2026-06-26 07:55",
-    high: 27,
-    low: 21,
-    kakaoStatus: "발송 대기",
-    message:
-      "오후 3시 이후 비 예보가 있습니다. 최고기온 27°C / 최저기온 21°C, 강수확률 최대 70%",
-    reasons: [
-      "15시 이후 강수확률 70%",
-      "예상 강수형태: 비",
-      "퇴근 시간대 17:00~20:00 강수 가능성 있음",
-    ],
-    forecast: [
-      { time: "09:00", pop: 30, type: "없음", temp: 24, amount: "0mm", sky: "흐림" },
-      { time: "12:00", pop: 45, type: "없음", temp: 26, amount: "0mm", sky: "흐림" },
-      { time: "15:00", pop: 70, type: "비", temp: 25, amount: "1~4mm", sky: "비" },
-      { time: "18:00", pop: 65, type: "비", temp: 23, amount: "1mm", sky: "비" },
-      { time: "21:00", pop: 40, type: "없음", temp: 22, amount: "0mm", sky: "흐림" },
-    ],
+const workflowSteps = [
+  {
+    time: "한 번",
+    title: "폰 위치 저장",
+    detail: "카카오톡 받을 폰에서 위치 권한 허용",
   },
-  recommend: {
-    label: "권장",
-    decision: "휴대용 우산 권장",
-    level: 2,
-    summary: "강수확률은 높지 않지만 퇴근 시간대 소나기 가능성이 있습니다.",
-    detail:
-      "40~59% 강수확률이 반복되고 이동 시간대에 걸쳐 있어 가벼운 우산을 권장합니다.",
-    region: "서울 성동구",
-    baseTime: "2026-06-26 07:55",
-    high: 29,
-    low: 22,
-    kakaoStatus: "발송 대기",
-    message:
-      "강수확률은 높지 않지만 퇴근 시간대 소나기 가능성이 있어 휴대용 우산을 권장합니다.",
-    reasons: [
-      "퇴근 시간대 강수확률 45%",
-      "40~59% 시간대가 2개 이상",
-      "불확실성이 있어 권장으로 안내",
-    ],
-    forecast: [
-      { time: "09:00", pop: 20, type: "없음", temp: 25, amount: "0mm", sky: "구름많음" },
-      { time: "12:00", pop: 35, type: "없음", temp: 28, amount: "0mm", sky: "구름많음" },
-      { time: "15:00", pop: 45, type: "없음", temp: 28, amount: "0mm", sky: "흐림" },
-      { time: "18:00", pop: 45, type: "소나기", temp: 26, amount: "1mm 미만", sky: "흐림" },
-      { time: "21:00", pop: 30, type: "없음", temp: 24, amount: "0mm", sky: "흐림" },
-    ],
+  {
+    time: "07:55",
+    title: "날씨 조회",
+    detail: "저장된 좌표로 오늘 예보 조회",
   },
-  clear: {
-    label: "불필요",
-    decision: "우산 불필요",
-    level: 1,
-    summary: "오늘은 강수 예보가 없어 우산이 필요하지 않습니다.",
-    detail:
-      "전 시간대 강수확률이 낮고 강수형태가 없어 일반 이동에는 우산 없이도 충분합니다.",
-    region: "서울 성동구",
-    baseTime: "2026-06-26 07:55",
-    high: 30,
-    low: 23,
-    kakaoStatus: "발송 대기",
-    message:
-      "오늘은 강수 예보가 없어 우산이 필요하지 않습니다. 최고기온 30°C / 최저기온 23°C",
-    reasons: [
-      "전 시간대 강수확률 30% 미만",
-      "강수형태 없음",
-      "예상 강수량 0mm",
-    ],
-    forecast: [
-      { time: "09:00", pop: 10, type: "없음", temp: 25, amount: "0mm", sky: "맑음" },
-      { time: "12:00", pop: 10, type: "없음", temp: 29, amount: "0mm", sky: "맑음" },
-      { time: "15:00", pop: 20, type: "없음", temp: 30, amount: "0mm", sky: "구름많음" },
-      { time: "18:00", pop: 20, type: "없음", temp: 28, amount: "0mm", sky: "구름많음" },
-      { time: "21:00", pop: 10, type: "없음", temp: 25, amount: "0mm", sky: "맑음" },
-    ],
+  {
+    time: "07:58",
+    title: "우산 판단",
+    detail: "강수확률과 강수형태로 필요 여부 계산",
   },
-};
-
-const pipelineSteps = [
-  { time: "07:45", title: "날씨 수집", detail: "기상청 API 호출 및 예보 저장" },
-  { time: "07:55", title: "우산 판단", detail: "강수확률, 형태, 시간대 가중치 반영" },
-  { time: "07:58", title: "홈페이지 갱신", detail: "최신 카드와 상세 표 업데이트" },
-  { time: "08:00", title: "카카오 발송", detail: "나에게 보내기 메시지 전송" },
+  {
+    time: "08:00",
+    title: "PlayMCP 발송",
+    detail: "ChatGPT 자동화가 카카오톡 전송",
+  },
 ];
 
-const mvpItems = [
-  "단일 지역 날씨 조회",
-  "우산 필요 여부 3단계 판단",
-  "홈페이지 자동 업데이트",
-  "카카오톡 나에게 보내기",
-  "수집 및 발송 로그 저장",
-  "실패 시 재시도",
-];
-
-const statusClass: Record<ScenarioKey, string> = {
+const statusClass = {
   need: "status-need",
   recommend: "status-recommend",
   clear: "status-clear",
 };
 
 export default function Home() {
-  const [scenarioKey, setScenarioKey] = useState<ScenarioKey>("need");
-  const [kakaoConfig, setKakaoConfig] = useState<KakaoConfigStatus | null>(null);
-  const [sendState, setSendState] = useState<SendState>({
+  const [weather, setWeather] = useState<WeatherData | null>(null);
+  const [error, setError] = useState("");
+  const [label, setLabel] = useState("내 휴대폰 위치");
+  const [saveState, setSaveState] = useState<SaveState>({
     status: "idle",
-    message: "카카오 환경변수 설정 후 실제 메시지를 보낼 수 있습니다.",
+    message: "카카오톡을 받을 휴대폰에서 위치를 저장하면 그 위치 기준으로 알림을 보냅니다.",
   });
-  const scenario = scenarios[scenarioKey];
 
-  const maxPop = useMemo(
-    () => Math.max(...scenario.forecast.map((slot) => slot.pop)),
-    [scenario],
-  );
+  async function loadWeather() {
+    setError("");
+    const response = await fetch("/api/weather/current", { cache: "no-store" });
+    const payload = await response.json();
+
+    if (!response.ok) {
+      throw new Error(payload.error || "날씨 정보를 가져오지 못했습니다.");
+    }
+
+    setWeather(payload as WeatherData);
+    setLabel((payload as WeatherData).location.label);
+  }
 
   useEffect(() => {
-    let ignore = false;
-
-    fetch("/api/kakao/status")
-      .then((response) => response.json())
-      .then((payload: { configured?: KakaoConfigStatus }) => {
-        if (!ignore && payload.configured) {
-          setKakaoConfig(payload.configured);
-        }
-      })
-      .catch(() => {
-        if (!ignore) {
-          setSendState({
-            status: "error",
-            message: "카카오 연결 상태를 불러오지 못했습니다.",
-          });
-        }
-      });
-
-    return () => {
-      ignore = true;
-    };
+    loadWeather().catch((loadError) => {
+      setError(
+        loadError instanceof Error
+          ? loadError.message
+          : "날씨 정보를 가져오지 못했습니다.",
+      );
+    });
   }, []);
 
-  async function sendKakaoTest() {
-    setSendState({ status: "sending", message: "카카오톡으로 발송 중입니다." });
-
-    try {
-      const response = await fetch("/api/kakao/send", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          region: scenario.region,
-          decision: scenario.decision,
-          summary: scenario.summary,
-          high: scenario.high,
-          low: scenario.low,
-          maxPop,
-          detailUrl: window.location.href,
-        }),
-      });
-      const payload = (await response.json()) as {
-        ok?: boolean;
-        error?: string;
-        rotatedRefreshToken?: boolean;
-      };
-
-      if (!response.ok || !payload.ok) {
-        throw new Error(payload.error || "발송에 실패했습니다.");
-      }
-
-      setSendState({
-        status: "success",
-        message: payload.rotatedRefreshToken
-          ? "발송 성공. 새 refresh token이 발급되어 환경변수 갱신이 필요합니다."
-          : "카카오톡 나에게 보내기 발송이 완료됐습니다.",
-      });
-    } catch (error) {
-      setSendState({
+  function savePhoneLocation() {
+    if (!navigator.geolocation) {
+      setSaveState({
         status: "error",
-        message:
-          error instanceof Error ? error.message : "카카오톡 발송에 실패했습니다.",
+        message: "이 브라우저는 위치 권한을 지원하지 않습니다.",
       });
+      return;
     }
+
+    setSaveState({
+      status: "saving",
+      message: "휴대폰 위치 권한을 요청하는 중입니다.",
+    });
+
+    navigator.geolocation.getCurrentPosition(
+      async (position) => {
+        try {
+          const response = await fetch("/api/location", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({
+              label,
+              latitude: position.coords.latitude,
+              longitude: position.coords.longitude,
+            }),
+          });
+          const payload = await response.json();
+
+          if (!response.ok) {
+            throw new Error(payload.error || "위치 저장에 실패했습니다.");
+          }
+
+          setSaveState({
+            status: "success",
+            message: "휴대폰 위치가 저장됐습니다. 다음 알림부터 이 위치를 사용합니다.",
+          });
+          await loadWeather();
+        } catch (saveError) {
+          setSaveState({
+            status: "error",
+            message:
+              saveError instanceof Error
+                ? saveError.message
+                : "위치 저장에 실패했습니다.",
+          });
+        }
+      },
+      () => {
+        setSaveState({
+          status: "error",
+          message: "위치 권한이 거부됐습니다. 브라우저 설정에서 위치 권한을 허용해 주세요.",
+        });
+      },
+      { enableHighAccuracy: false, maximumAge: 300000, timeout: 15000 },
+    );
+  }
+
+  if (!weather) {
+    return (
+      <main className="app-shell">
+        <section className="card loading-panel">
+          <p className="eyebrow">Morning Weather Agent</p>
+          <h1>위치 기반 날씨를 불러오는 중입니다</h1>
+          <p>{error || "저장된 위치가 없으면 서울 성동구 기준으로 먼저 표시합니다."}</p>
+        </section>
+      </main>
+    );
   }
 
   return (
     <main className="app-shell">
       <header className="topbar">
         <div>
-          <p className="eyebrow">Morning Weather Agent</p>
+          <p className="eyebrow">PlayMCP Weather Agent</p>
           <h1>오늘 우산 필요할까?</h1>
         </div>
         <div className="topbar-meta">
-          <span>{scenario.region}</span>
-          <span>기준 {scenario.baseTime}</span>
+          <span>{weather.location.label}</span>
+          <span>
+            {weather.location.source === "saved" ? "휴대폰 위치 기준" : "기본 위치 기준"}
+          </span>
         </div>
       </header>
 
       <section className="hero-grid" aria-label="오늘의 우산 판단">
-        <article className={`decision-panel card ${statusClass[scenarioKey]}`}>
+        <article
+          className={`decision-panel card ${statusClass[weather.decision.key]}`}
+        >
           <div className="decision-header">
-            <span className="status-badge">{scenario.label}</span>
-            <span className="level">Level {scenario.level}</span>
+            <span className="status-badge">{weather.decision.label}</span>
+            <span className="level">Level {weather.decision.level}</span>
           </div>
-          <h2>{scenario.decision}</h2>
-          <p className="summary">{scenario.summary}</p>
-          <p className="detail">{scenario.detail}</p>
+          <h2>{weather.decision.title}</h2>
+          <p className="summary">{weather.decision.summary}</p>
+          <p className="detail">{weather.decision.detail}</p>
 
           <div className="metric-grid" aria-label="오늘 날씨 요약">
             <div>
               <span>최고</span>
-              <strong>{scenario.high}°C</strong>
+              <strong>{weather.high}°C</strong>
             </div>
             <div>
               <span>최저</span>
-              <strong>{scenario.low}°C</strong>
+              <strong>{weather.low}°C</strong>
             </div>
             <div>
               <span>강수확률</span>
-              <strong>{maxPop}%</strong>
+              <strong>{weather.maxPop}%</strong>
             </div>
           </div>
         </article>
@@ -273,68 +220,47 @@ export default function Home() {
         <article className="visual-panel card">
           <img
             src="/rain-forecast.png"
-            alt="비 예보를 나타내는 우산과 강수 시간 그래픽"
+            alt="우산과 시간대별 강수확률 그래픽"
           />
           <div className="message-preview">
-            <span>카카오톡 알림</span>
-            <strong>{scenario.kakaoStatus}</strong>
-            <p>{scenario.message}</p>
-            <div className="kakao-actions">
-              <div className="kakao-status-grid">
-                <span className={kakaoConfig?.restApiKey ? "ready" : ""}>
-                  REST API 키
-                </span>
-                <span className={kakaoConfig?.redirectUri ? "ready" : ""}>
-                  Redirect URI
-                </span>
-                <span className={kakaoConfig?.refreshToken ? "ready" : ""}>
-                  Refresh Token
-                </span>
-              </div>
-              <div className="kakao-button-row">
-                <button
-                  disabled={!kakaoConfig?.authReady}
-                  onClick={() => {
-                    window.location.href = "/api/kakao/auth-url";
-                  }}
-                  type="button"
-                >
-                  카카오 연결
-                </button>
-                <button
-                  disabled={sendState.status === "sending"}
-                  onClick={sendKakaoTest}
-                  type="button"
-                >
-                  테스트 발송
-                </button>
-              </div>
-              <p className={`send-result ${sendState.status}`}>
-                {sendState.message}
-              </p>
+            <span>PlayMCP 카카오톡 알림</span>
+            <strong>ChatGPT 자동화 발송</strong>
+            <p>{weather.decision.message}</p>
+            <div className="playmcp-status">
+              <span className="ready">PlayMCP 연결 확인됨</span>
+              <span className={weather.location.source === "saved" ? "ready" : ""}>
+                {weather.location.source === "saved"
+                  ? "휴대폰 위치 저장됨"
+                  : "기본 위치 사용 중"}
+              </span>
             </div>
           </div>
         </article>
       </section>
 
-      <section className="control-band" aria-label="판단 시나리오">
+      <section className="location-band card" aria-label="휴대폰 위치 설정">
         <div>
-          <p className="section-kicker">판단 상태</p>
-          <h2>PRD 기준 3단계 판단 미리보기</h2>
+          <p className="section-kicker">Phone Location</p>
+          <h2>카카오톡 받을 휴대폰 위치로 지역 설정</h2>
+          <p>
+            카카오톡이나 PlayMCP가 휴대폰 GPS를 자동으로 읽을 수는 없어서,
+            받을 폰에서 이 페이지를 열고 위치 권한을 한 번 허용해야 합니다.
+          </p>
         </div>
-        <div className="segmented-control" role="tablist" aria-label="우산 판단 상태">
-          {Object.entries(scenarios).map(([key, item]) => (
-            <button
-              aria-selected={scenarioKey === key}
-              className={scenarioKey === key ? "active" : ""}
-              key={key}
-              onClick={() => setScenarioKey(key as ScenarioKey)}
-              role="tab"
-              type="button"
-            >
-              {item.label}
-            </button>
-          ))}
+        <div className="location-controls">
+          <input
+            aria-label="위치 이름"
+            className="text-input"
+            onChange={(event) => setLabel(event.target.value)}
+            placeholder="예: 집, 회사, 서울 성동구"
+            value={label}
+          />
+          <button onClick={savePhoneLocation} type="button">
+            이 폰 위치 저장
+          </button>
+          <p className={`send-result ${saveState.status}`}>
+            {saveState.message}
+          </p>
         </div>
       </section>
 
@@ -343,13 +269,13 @@ export default function Home() {
           <div className="section-heading">
             <div>
               <p className="section-kicker">시간대별 예보</p>
-              <h2>강수확률과 강수형태</h2>
+              <h2>저장된 위치의 오늘 예보</h2>
             </div>
-            <span className="freshness">자동 업데이트 전</span>
+            <span className="freshness">기준 {weather.baseTime}</span>
           </div>
 
           <div className="forecast-list">
-            {scenario.forecast.map((slot) => (
+            {weather.forecast.map((slot) => (
               <div className="forecast-row" key={slot.time}>
                 <span className="forecast-time">{slot.time}</span>
                 <div
@@ -372,43 +298,38 @@ export default function Home() {
           <p className="section-kicker">판단 근거</p>
           <h2>Decision Engine</h2>
           <ul>
-            {scenario.reasons.map((reason) => (
+            {weather.decision.reasons.map((reason) => (
               <li key={reason}>{reason}</li>
             ))}
           </ul>
+          <div className="coordinate-note">
+            <span>좌표</span>
+            <strong>
+              {weather.location.latitude.toFixed(4)},{" "}
+              {weather.location.longitude.toFixed(4)}
+            </strong>
+          </div>
         </article>
       </section>
 
-      <section className="workflow-band" aria-label="매일 아침 자동화 흐름">
+      <section className="workflow-band" aria-label="PlayMCP 자동화 흐름">
         <div className="section-heading">
           <div>
             <p className="section-kicker">자동화 흐름</p>
-            <h2>오전 8시 발송을 위한 실행 순서</h2>
+            <h2>위치 기반 카카오톡 발송 순서</h2>
           </div>
-          <span className="freshness">재시도 정책 포함</span>
+          <span className="freshness">메시지 200자 이하</span>
         </div>
 
         <div className="timeline">
-          {pipelineSteps.map((step) => (
-            <article className="timeline-item" key={step.time}>
+          {workflowSteps.map((step) => (
+            <article className="timeline-item" key={`${step.time}-${step.title}`}>
               <time>{step.time}</time>
               <h3>{step.title}</h3>
               <p>{step.detail}</p>
             </article>
           ))}
         </div>
-      </section>
-
-      <section className="mvp-band" aria-label="MVP 범위">
-        <div>
-          <p className="section-kicker">MVP Scope</p>
-          <h2>초기 버전에 포함되는 기능</h2>
-        </div>
-        <ul className="mvp-list">
-          {mvpItems.map((item) => (
-            <li key={item}>{item}</li>
-          ))}
-        </ul>
       </section>
     </main>
   );

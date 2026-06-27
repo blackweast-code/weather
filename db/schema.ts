@@ -1,4 +1,9 @@
-// Intentionally empty by default.
-// Add Drizzle tables here when the site actually needs a database.
-// See examples/d1/db/schema.ts for an opt-in example.
-export {};
+import { real, sqliteTable, text } from "drizzle-orm/sqlite-core";
+
+export const locationSettings = sqliteTable("location_settings", {
+  id: text("id").primaryKey(),
+  label: text("label").notNull(),
+  latitude: real("latitude").notNull(),
+  longitude: real("longitude").notNull(),
+  updatedAt: text("updated_at").notNull(),
+});
