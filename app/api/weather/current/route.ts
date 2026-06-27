@@ -1,39 +1,11 @@
-import { eq } from "drizzle-orm";
-import { ensureLocationSettingsTable, getDb } from "@/db";
-import { locationSettings } from "@/db/schema";
-import { DEFAULT_LOCATION, fetchWeather, type SavedLocation } from "@/lib/weather";
+import { getLocation } from "@/lib/location-store";
+import { fetchWeather } from "@/lib/weather";
 
-const PRIMARY_ID = "primary";
+export const dynamic = "force-dynamic";
 
-async function getSavedLocation(): Promise<SavedLocation> {
+export async function GET(request: Request) {
   try {
-    await ensureLocationSettingsTable();
-    const db = getDb();
-    const [location] = await db
-      .select()
-      .from(locationSettings)
-      .where(eq(locationSettings.id, PRIMARY_ID))
-      .limit(1);
-
-    if (!location) {
-      return DEFAULT_LOCATION;
-    }
-
-    return {
-      label: location.label,
-      latitude: location.latitude,
-      longitude: location.longitude,
-      updatedAt: location.updatedAt,
-      source: "saved",
-    };
-  } catch {
-    return DEFAULT_LOCATION;
-  }
-}
-
-export async function GET() {
-  try {
-    const location = await getSavedLocation();
+    const { location } = getLocation(request);
     const weather = await fetchWeather(location);
 
     return Response.json(weather);

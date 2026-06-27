@@ -12,6 +12,9 @@ const { d1, r2 } = hostingConfig;
 const localBindingConfig = {
   main: "./worker/index.ts",
   compatibility_flags: ["nodejs_compat"],
+  vars: {
+    LOCATION_UPDATE_TOKEN: process.env.LOCATION_UPDATE_TOKEN ?? "",
+  },
   d1_databases: d1
     ? [
         {
@@ -32,6 +35,9 @@ const localBindingConfig = {
 };
 
 export default defineConfig({
+  server: {
+    allowedHosts: [".lhr.life"],
+  },
   plugins: [
     vinext(),
     sites(),
