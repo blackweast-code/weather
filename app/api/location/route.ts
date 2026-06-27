@@ -4,7 +4,9 @@ import {
   locationCookieHeader,
   normalizeLocation,
   saveLocation,
+  withResolvedAddress,
 } from "@/lib/location-store";
+import { reverseGeocode } from "@/lib/geocode";
 
 export const dynamic = "force-dynamic";
 
@@ -58,13 +60,16 @@ export async function POST(request: Request) {
     );
   }
 
-  saveLocation(location);
+  const resolvedAddress = await reverseGeocode(location.latitude, location.longitude);
+  const resolvedLocation = withResolvedAddress(location, resolvedAddress);
+
+  saveLocation(resolvedLocation);
 
   return Response.json(
-    { location },
+    { location: resolvedLocation },
     {
       headers: {
-        "Set-Cookie": locationCookieHeader(request, location),
+        "Set-Cookie": locationCookieHeader(request, resolvedLocation),
       },
     },
   );

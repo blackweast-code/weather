@@ -1,5 +1,7 @@
 export type SavedLocation = {
   label: string;
+  address?: string;
+  locality?: string;
   latitude: number;
   longitude: number;
   updatedAt: string;
@@ -13,6 +15,37 @@ export type ForecastSlot = {
   temp: number;
   amount: string;
   sky: string;
+  code: number;
+  precipitation: number;
+  humidity: number;
+  wind: number;
+};
+
+export type PrecipitationSpot = {
+  id: string;
+  label: string;
+  latitude: number;
+  longitude: number;
+  x: number;
+  y: number;
+  pop: number;
+  temp: number;
+  precipitation: number;
+  sky: string;
+  type: string;
+};
+
+export type PrecipitationMap = {
+  source: string;
+  maxPop: number;
+  maxPrecipitation: number;
+  spots: PrecipitationSpot[];
+};
+
+export type WeatherSourceInfo = {
+  weather: string;
+  address: string;
+  map: string;
 };
 
 export type UmbrellaDecision = {
@@ -33,6 +66,9 @@ export type WeatherResult = {
   low: number;
   maxPop: number;
   forecast: ForecastSlot[];
+  hourly: ForecastSlot[];
+  precipitationMap: PrecipitationMap;
+  sourceInfo: WeatherSourceInfo;
   decision: UmbrellaDecision;
 };
 
@@ -43,11 +79,15 @@ type OpenMeteoResponse = {
     precipitation_probability?: number[];
     precipitation?: number[];
     weather_code?: number[];
+    relative_humidity_2m?: number[];
+    wind_speed_10m?: number[];
   };
 };
 
 export const DEFAULT_LOCATION: SavedLocation = {
   label: "서울 성동구",
+  address: "서울특별시 성동구",
+  locality: "서울 성동구",
   latitude: 37.5636,
   longitude: 127.0365,
   updatedAt: "",
@@ -105,6 +145,8 @@ function makeSlot(hourly: Required<OpenMeteoResponse>["hourly"], index: number) 
   const pop = Math.round(hourly.precipitation_probability?.[index] ?? 0);
   const precipitation = hourly.precipitation?.[index] ?? 0;
   const code = hourly.weather_code?.[index] ?? 0;
+  const humidity = Math.round(hourly.relative_humidity_2m?.[index] ?? 0);
+  const wind = Math.round(hourly.wind_speed_10m?.[index] ?? 0);
 
   return {
     time: time.slice(11, 16) || "--:--",
@@ -113,7 +155,22 @@ function makeSlot(hourly: Required<OpenMeteoResponse>["hourly"], index: number) 
     temp,
     amount: precipitation > 0 ? `${precipitation.toFixed(1)}mm` : "0mm",
     sky: skyLabel(code),
+    code,
+    precipitation,
+    humidity,
+    wind,
   };
+}
+
+function findCurrentOrNextIndex(times: string[]) {
+  const now = new Date();
+  const koreaNow = new Date(
+    now.toLocaleString("en-US", { timeZone: "Asia/Seoul" }),
+  ).getTime();
+
+  const nextIndex = times.findIndex((time) => new Date(time).getTime() >= koreaNow);
+
+  return nextIndex === -1 ? 0 : nextIndex;
 }
 
 function decideUmbrella(location: SavedLocation, forecast: ForecastSlot[]) {
@@ -189,7 +246,7 @@ export async function fetchWeather(location: SavedLocation): Promise<WeatherResu
   url.searchParams.set("longitude", String(location.longitude));
   url.searchParams.set(
     "hourly",
-    "temperature_2m,precipitation_probability,precipitation,weather_code",
+    "temperature_2m,precipitation_probability,precipitation,weather_code,relative_humidity_2m,wind_speed_10m",
   );
   url.searchParams.set("timezone", "Asia/Seoul");
   url.searchParams.set("forecast_days", "1");
@@ -211,8 +268,16 @@ export async function fetchWeather(location: SavedLocation): Promise<WeatherResu
   const forecast = targetHours.map((hour) =>
     makeSlot(hourly, findNearestIndex(hourly.time ?? [], hour)),
   );
+  const startIndex = findCurrentOrNextIndex(hourly.time ?? []);
+  const hourlyTimeline = Array.from({ length: 14 }, (_, offset) =>
+    makeSlot(
+      hourly,
+      Math.min(startIndex + offset, Math.max((hourly.time?.length ?? 1) - 1, 0)),
+    ),
+  );
   const temps = hourly.temperature_2m ?? [];
   const decision = decideUmbrella(location, forecast);
+  const precipitationMap = await fetchPrecipitationMap(location, startIndex);
 
   return {
     location,
@@ -221,6 +286,101 @@ export async function fetchWeather(location: SavedLocation): Promise<WeatherResu
     low: Math.round(Math.min(...temps)),
     maxPop: Math.max(...forecast.map((slot) => slot.pop)),
     forecast,
+    hourly: hourlyTimeline,
+    precipitationMap,
+    sourceInfo: {
+      weather: "Open-Meteo Forecast API",
+      address: "OpenStreetMap Nominatim",
+      map: "OpenStreetMap",
+    },
     decision,
   };
+}
+
+const MAP_SAMPLES = [
+  { id: "nw", label: "북서", lat: 0.055, lon: -0.07, x: 22, y: 24 },
+  { id: "n", label: "북쪽", lat: 0.06, lon: 0, x: 50, y: 19 },
+  { id: "ne", label: "북동", lat: 0.055, lon: 0.07, x: 78, y: 24 },
+  { id: "w", label: "서쪽", lat: 0, lon: -0.075, x: 17, y: 50 },
+  { id: "c", label: "현재 위치", lat: 0, lon: 0, x: 50, y: 50 },
+  { id: "e", label: "동쪽", lat: 0, lon: 0.075, x: 83, y: 50 },
+  { id: "sw", label: "남서", lat: -0.055, lon: -0.07, x: 22, y: 76 },
+  { id: "s", label: "남쪽", lat: -0.06, lon: 0, x: 50, y: 81 },
+  { id: "se", label: "남동", lat: -0.055, lon: 0.07, x: 78, y: 76 },
+];
+
+async function fetchSpot(location: SavedLocation, sample: (typeof MAP_SAMPLES)[number], index: number) {
+  const latitude = location.latitude + sample.lat;
+  const longitude = location.longitude + sample.lon;
+  const url = new URL("https://api.open-meteo.com/v1/forecast");
+  url.searchParams.set("latitude", String(latitude));
+  url.searchParams.set("longitude", String(longitude));
+  url.searchParams.set(
+    "hourly",
+    "temperature_2m,precipitation_probability,precipitation,weather_code,relative_humidity_2m,wind_speed_10m",
+  );
+  url.searchParams.set("timezone", "Asia/Seoul");
+  url.searchParams.set("forecast_days", "1");
+
+  const response = await fetch(url, { next: { revalidate: 60 * 10 } });
+  if (!response.ok) throw new Error("지도용 강수량을 가져오지 못했습니다.");
+
+  const data = (await response.json()) as OpenMeteoResponse;
+  const hourly = data.hourly;
+  if (!hourly?.time?.length) throw new Error("지도용 예보 데이터가 비어 있습니다.");
+
+  const slot = makeSlot(hourly, Math.min(index, hourly.time.length - 1));
+
+  return {
+    id: sample.id,
+    label: sample.label,
+    latitude,
+    longitude,
+    x: sample.x,
+    y: sample.y,
+    pop: slot.pop,
+    temp: slot.temp,
+    precipitation: slot.precipitation,
+    sky: slot.sky,
+    type: slot.type,
+  };
+}
+
+async function fetchPrecipitationMap(
+  location: SavedLocation,
+  index: number,
+): Promise<PrecipitationMap> {
+  try {
+    const spots = await Promise.all(
+      MAP_SAMPLES.map((sample) => fetchSpot(location, sample, index)),
+    );
+
+    return {
+      source: "Open-Meteo 주변 좌표 샘플",
+      maxPop: Math.max(...spots.map((spot) => spot.pop)),
+      maxPrecipitation: Math.max(...spots.map((spot) => spot.precipitation)),
+      spots,
+    };
+  } catch {
+    const fallbackSpots = MAP_SAMPLES.map((sample) => ({
+      id: sample.id,
+      label: sample.label,
+      latitude: location.latitude + sample.lat,
+      longitude: location.longitude + sample.lon,
+      x: sample.x,
+      y: sample.y,
+      pop: 0,
+      temp: 0,
+      precipitation: 0,
+      sky: "확인 중",
+      type: "없음",
+    }));
+
+    return {
+      source: "Open-Meteo 주변 좌표 샘플",
+      maxPop: 0,
+      maxPrecipitation: 0,
+      spots: fallbackSpots,
+    };
+  }
 }

@@ -54,6 +54,22 @@ export function normalizeLocation(
   };
 }
 
+export function withResolvedAddress(
+  location: SavedLocation,
+  address: { label: string; address: string; locality: string } | null,
+) {
+  if (!address) return location;
+  const isGenericLabel =
+    location.label === "내 휴대폰 위치" || location.label === DEFAULT_LOCATION.label;
+
+  return {
+    ...location,
+    label: isGenericLabel ? address.label : location.label,
+    address: address.address,
+    locality: address.locality,
+  };
+}
+
 function requestCookies(request: Request) {
   const header = request.headers.get("cookie") ?? "";
 
@@ -80,12 +96,19 @@ function locationFromCookie(request: Request) {
 
   try {
     const parsed = JSON.parse(raw) as Partial<SavedLocation>;
-    return normalizeLocation(
+    const location = normalizeLocation(
       parsed.label,
       parsed.latitude,
       parsed.longitude,
       parsed.updatedAt,
     );
+    if (!location) return null;
+
+    return {
+      ...location,
+      address: parsed.address,
+      locality: parsed.locality,
+    };
   } catch {
     return null;
   }
@@ -93,6 +116,8 @@ function locationFromCookie(request: Request) {
 
 function locationFromQuery(request: Request) {
   const url = new URL(request.url);
+  if (!url.searchParams.has("lat") || !url.searchParams.has("lon")) return null;
+
   const latitude = Number(url.searchParams.get("lat"));
   const longitude = Number(url.searchParams.get("lon"));
   const label = url.searchParams.get("label") ?? "내 휴대폰 위치";

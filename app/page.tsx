@@ -10,11 +10,31 @@ type ForecastSlot = {
   temp: number;
   amount: string;
   sky: string;
+  code: number;
+  precipitation: number;
+  humidity: number;
+  wind: number;
+};
+
+type PrecipitationSpot = {
+  id: string;
+  label: string;
+  latitude: number;
+  longitude: number;
+  x: number;
+  y: number;
+  pop: number;
+  temp: number;
+  precipitation: number;
+  sky: string;
+  type: string;
 };
 
 type WeatherData = {
   location: {
     label: string;
+    address?: string;
+    locality?: string;
     latitude: number;
     longitude: number;
     updatedAt: string;
@@ -25,6 +45,18 @@ type WeatherData = {
   low: number;
   maxPop: number;
   forecast: ForecastSlot[];
+  hourly: ForecastSlot[];
+  precipitationMap: {
+    source: string;
+    maxPop: number;
+    maxPrecipitation: number;
+    spots: PrecipitationSpot[];
+  };
+  sourceInfo: {
+    weather: string;
+    address: string;
+    map: string;
+  };
   decision: {
     key: "need" | "recommend" | "clear";
     label: string;
@@ -41,6 +73,8 @@ type SaveState = {
   status: "idle" | "saving" | "success" | "error";
   message: string;
 };
+
+type TimelineMode = "weather" | "rain" | "wind" | "humidity";
 
 const workflowSteps = [
   {
@@ -71,11 +105,55 @@ const statusClass = {
   clear: "status-clear",
 };
 
+const timelineModes: Array<{ key: TimelineMode; label: string }> = [
+  { key: "weather", label: "날씨" },
+  { key: "rain", label: "강수" },
+  { key: "wind", label: "바람" },
+  { key: "humidity", label: "습도" },
+];
+
+function slotIconClass(slot: ForecastSlot) {
+  if (slot.type === "비" || slot.type === "소나기") return "rain";
+  if (slot.type === "눈") return "snow";
+  if (slot.sky === "구름" || slot.sky === "흐림") return "cloud";
+  return "sun";
+}
+
+function timelineMetric(slot: ForecastSlot, mode: TimelineMode) {
+  if (mode === "rain") return `${slot.pop}%`;
+  if (mode === "wind") return `${slot.wind}km/h`;
+  if (mode === "humidity") return `${slot.humidity}%`;
+  return slot.type === "없음" ? slot.sky : slot.type;
+}
+
+function rainIntensity(spot: PrecipitationSpot) {
+  if (spot.precipitation >= 3 || spot.pop >= 70) return "heavy";
+  if (spot.precipitation >= 1 || spot.pop >= 50) return "mid";
+  if (spot.pop >= 25) return "light";
+  return "clear";
+}
+
+function openStreetMapUrl(location: WeatherData["location"]) {
+  const lat = location.latitude;
+  const lon = location.longitude;
+  const latPad = 0.07;
+  const lonPad = 0.09;
+  const bbox = [
+    lon - lonPad,
+    lat - latPad,
+    lon + lonPad,
+    lat + latPad,
+  ].join(",");
+
+  return `https://www.openstreetmap.org/export/embed.html?bbox=${bbox}&layer=mapnik&marker=${lat},${lon}`;
+}
+
 export default function Home() {
   const [weather, setWeather] = useState<WeatherData | null>(null);
   const [error, setError] = useState("");
   const [label, setLabel] = useState("내 휴대폰 위치");
   const [adminToken, setAdminToken] = useState("");
+  const [timelineMode, setTimelineMode] = useState<TimelineMode>("weather");
   const [saveState, setSaveState] = useState<SaveState>({
     status: "idle",
     message:
@@ -102,7 +180,7 @@ export default function Home() {
     longitude: number,
     locationLabel: string,
     updateToken: string,
-  ) {
+  ): Promise<WeatherData["location"]> {
     const response = await fetch("/api/location", {
       method: "POST",
       headers: {
@@ -120,6 +198,8 @@ export default function Home() {
     if (!response.ok) {
       throw new Error(payload.error || "위치 저장에 실패했습니다.");
     }
+
+    return payload.location as WeatherData["location"];
   }
 
   function collectPhoneLocation(
@@ -157,7 +237,7 @@ export default function Home() {
       async (position) => {
         try {
           const locationLabel = label.trim() || "내 휴대폰 위치";
-          await saveCoordinates(
+          const savedLocation = await saveCoordinates(
             position.coords.latitude,
             position.coords.longitude,
             locationLabel,
@@ -169,8 +249,8 @@ export default function Home() {
             status: "success",
             message:
               mode === "auto"
-                ? "위치가 자동 저장됐습니다. 이 휴대폰 위치 기준으로 날씨를 갱신했습니다."
-                : "위치를 다시 저장했습니다. 다음 알림부터 이 위치를 사용합니다.",
+                ? `위치가 자동 저장됐습니다. 확인된 위치: ${savedLocation.address ?? savedLocation.label}`
+                : `위치를 다시 저장했습니다. 확인된 위치: ${savedLocation.address ?? savedLocation.label}`,
           });
         } catch (saveError) {
           setSaveState({
@@ -246,6 +326,7 @@ export default function Home() {
           <span>
             {weather.location.source === "saved" ? "휴대폰 위치 기준" : "기본 위치 기준"}
           </span>
+          <span>날씨 출처: {weather.sourceInfo.weather}</span>
         </div>
       </header>
 
@@ -277,11 +358,47 @@ export default function Home() {
           </div>
         </article>
 
-        <article className="visual-panel card">
-          <img
-            src="/rain-forecast.png"
-            alt="우산과 시간대별 강수확률 그래픽"
-          />
+        <article className="weather-map card">
+          <div className="map-header">
+            <div>
+              <p className="section-kicker">강수량 지도</p>
+              <h2>{weather.location.locality ?? weather.location.label}</h2>
+            </div>
+            <span className="freshness">{weather.precipitationMap.source}</span>
+          </div>
+          <div className="map-canvas">
+            <iframe
+              aria-label={`${weather.location.label} 주변 지도`}
+              loading="lazy"
+              src={openStreetMapUrl(weather.location)}
+              title="현재 위치 주변 지도"
+            />
+            <div className="rain-overlay" aria-hidden="true" />
+            {weather.precipitationMap.spots.map((spot) => (
+              <div
+                className={`rain-spot ${rainIntensity(spot)} ${
+                  spot.id === "c" ? "current" : ""
+                }`}
+                key={spot.id}
+                style={
+                  {
+                    "--x": `${spot.x}%`,
+                    "--y": `${spot.y}%`,
+                  } as CSSProperties
+                }
+              >
+                <strong>{spot.label}</strong>
+                <span>{spot.precipitation.toFixed(1)}mm</span>
+                <small>{spot.pop}%</small>
+              </div>
+            ))}
+          </div>
+          <div className="map-legend">
+            <span>0mm</span>
+            <span>1mm+</span>
+            <span>3mm+</span>
+            <strong>최대 {weather.precipitationMap.maxPop}%</strong>
+          </div>
           <div className="message-preview">
             <span>PlayMCP 카카오톡 알림</span>
             <strong>ChatGPT 자동화 발송</strong>
@@ -307,6 +424,14 @@ export default function Home() {
             브라우저에서만 가능합니다. 관리자 토큰을 저장한 휴대폰에서 열면
             자동으로 위치 권한을 요청하고, 허용된 좌표로 날씨를 다시 계산합니다.
           </p>
+          <div className="resolved-location">
+            <span>확인된 위치</span>
+            <strong>{weather.location.address ?? weather.location.label}</strong>
+            <small>
+              {weather.location.latitude.toFixed(5)},{" "}
+              {weather.location.longitude.toFixed(5)}
+            </small>
+          </div>
         </div>
         <div className="location-controls">
           <input
@@ -334,30 +459,40 @@ export default function Home() {
       </section>
 
       <section className="content-grid">
-        <article className="card forecast-card">
+        <article className="card hourly-card">
           <div className="section-heading">
             <div>
-              <p className="section-kicker">시간대별 예보</p>
-              <h2>저장된 위치의 오늘 예보</h2>
+              <p className="section-kicker">시간별 예보</p>
+              <h2>아이콘으로 보는 앞으로의 날씨</h2>
             </div>
             <span className="freshness">기준 {weather.baseTime}</span>
           </div>
 
-          <div className="forecast-list">
-            {weather.forecast.map((slot) => (
-              <div className="forecast-row" key={slot.time}>
-                <span className="forecast-time">{slot.time}</span>
-                <div
-                  aria-label={`${slot.time} 강수확률 ${slot.pop}%`}
-                  className="rain-bar"
-                  style={{ "--rain": `${slot.pop}%` } as CSSProperties}
-                >
+          <div className="weather-tabs" role="tablist" aria-label="시간별 예보 보기">
+            {timelineModes.map((mode) => (
+              <button
+                aria-selected={timelineMode === mode.key}
+                className={timelineMode === mode.key ? "active" : ""}
+                key={mode.key}
+                onClick={() => setTimelineMode(mode.key)}
+                role="tab"
+                type="button"
+              >
+                {mode.label}
+              </button>
+            ))}
+          </div>
+
+          <div className="hourly-strip" aria-label="시간별 날씨 표">
+            {weather.hourly.map((slot, index) => (
+              <div className="hour-card" key={`${slot.time}-${index}`}>
+                <strong>{slot.temp}°</strong>
+                <div className={`weather-icon ${slotIconClass(slot)}`}>
                   <span />
                 </div>
-                <strong>{slot.pop}%</strong>
-                <span>{slot.type}</span>
-                <span>{slot.temp}°C</span>
-                <span>{slot.amount}</span>
+                <time>{index === 0 ? "지금" : slot.time.slice(0, 2) + "시"}</time>
+                <small>{timelineMetric(slot, timelineMode)}</small>
+                <em>{slot.pop}%</em>
               </div>
             ))}
           </div>
@@ -377,6 +512,13 @@ export default function Home() {
               {weather.location.latitude.toFixed(4)},{" "}
               {weather.location.longitude.toFixed(4)}
             </strong>
+          </div>
+          <div className="coordinate-note">
+            <span>데이터 출처</span>
+            <strong>{weather.sourceInfo.weather}</strong>
+            <small>
+              주소 {weather.sourceInfo.address} · 지도 {weather.sourceInfo.map}
+            </small>
           </div>
         </article>
       </section>
