@@ -1,5 +1,5 @@
 import { eq } from "drizzle-orm";
-import { getDb } from "@/db";
+import { ensureLocationSettingsTable, getDb } from "@/db";
 import { locationSettings } from "@/db/schema";
 import { DEFAULT_LOCATION } from "@/lib/weather";
 
@@ -34,6 +34,7 @@ function isValidCoordinate(latitude: unknown, longitude: unknown) {
 
 export async function GET() {
   try {
+    await ensureLocationSettingsTable();
     const db = getDb();
     const [location] = await db
       .select()
@@ -100,6 +101,7 @@ export async function POST(request: Request) {
   const label = payload.label?.trim() || "내 휴대폰 위치";
 
   try {
+    await ensureLocationSettingsTable();
     const db = getDb();
     await db
       .insert(locationSettings)

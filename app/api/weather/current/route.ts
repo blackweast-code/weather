@@ -1,5 +1,5 @@
 import { eq } from "drizzle-orm";
-import { getDb } from "@/db";
+import { ensureLocationSettingsTable, getDb } from "@/db";
 import { locationSettings } from "@/db/schema";
 import { DEFAULT_LOCATION, fetchWeather, type SavedLocation } from "@/lib/weather";
 
@@ -7,6 +7,7 @@ const PRIMARY_ID = "primary";
 
 async function getSavedLocation(): Promise<SavedLocation> {
   try {
+    await ensureLocationSettingsTable();
     const db = getDb();
     const [location] = await db
       .select()
