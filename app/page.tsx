@@ -1,7 +1,7 @@
 "use client";
 
 import type { CSSProperties } from "react";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 type ForecastSlot = {
   time: string;
@@ -44,14 +44,14 @@ type SaveState = {
 
 const workflowSteps = [
   {
-    time: "한 번",
-    title: "폰 위치 저장",
-    detail: "카카오톡 받을 폰에서 위치 권한 허용",
+    time: "자동",
+    title: "휴대폰 위치 수집",
+    detail: "페이지가 열리면 브라우저 위치 권한 요청",
   },
   {
-    time: "07:55",
+    time: "즉시",
     title: "날씨 조회",
-    detail: "저장된 좌표로 오늘 예보 조회",
+    detail: "저장된 좌표로 오늘 예보 갱신",
   },
   {
     time: "07:58",
@@ -77,8 +77,10 @@ export default function Home() {
   const [label, setLabel] = useState("내 휴대폰 위치");
   const [saveState, setSaveState] = useState<SaveState>({
     status: "idle",
-    message: "카카오톡을 받을 휴대폰에서 위치를 저장하면 그 위치 기준으로 알림을 보냅니다.",
+    message:
+      "페이지가 열리면 자동으로 위치 권한을 요청합니다. 허용하면 이 휴대폰 위치 기준으로 날씨가 갱신됩니다.",
   });
+  const autoRequested = useRef(false);
 
   async function loadWeather() {
     setError("");
@@ -89,21 +91,35 @@ export default function Home() {
       throw new Error(payload.error || "날씨 정보를 가져오지 못했습니다.");
     }
 
-    setWeather(payload as WeatherData);
-    setLabel((payload as WeatherData).location.label);
+    const nextWeather = payload as WeatherData;
+    setWeather(nextWeather);
+    setLabel(nextWeather.location.label);
   }
 
-  useEffect(() => {
-    loadWeather().catch((loadError) => {
-      setError(
-        loadError instanceof Error
-          ? loadError.message
-          : "날씨 정보를 가져오지 못했습니다.",
-      );
+  async function saveCoordinates(
+    latitude: number,
+    longitude: number,
+    locationLabel: string,
+  ) {
+    const response = await fetch("/api/location", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        label: locationLabel,
+        latitude,
+        longitude,
+      }),
     });
-  }, []);
+    const payload = await response.json();
 
-  function savePhoneLocation() {
+    if (!response.ok) {
+      throw new Error(payload.error || "위치 저장에 실패했습니다.");
+    }
+  }
+
+  function collectPhoneLocation(mode: "auto" | "manual" = "manual") {
     if (!navigator.geolocation) {
       setSaveState({
         status: "error",
@@ -114,34 +130,29 @@ export default function Home() {
 
     setSaveState({
       status: "saving",
-      message: "휴대폰 위치 권한을 요청하는 중입니다.",
+      message:
+        mode === "auto"
+          ? "자동 위치 수집을 위해 브라우저 권한을 요청하는 중입니다."
+          : "휴대폰 위치 권한을 다시 요청하는 중입니다.",
     });
 
     navigator.geolocation.getCurrentPosition(
       async (position) => {
         try {
-          const response = await fetch("/api/location", {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-            },
-            body: JSON.stringify({
-              label,
-              latitude: position.coords.latitude,
-              longitude: position.coords.longitude,
-            }),
-          });
-          const payload = await response.json();
-
-          if (!response.ok) {
-            throw new Error(payload.error || "위치 저장에 실패했습니다.");
-          }
-
+          const locationLabel = label.trim() || "내 휴대폰 위치";
+          await saveCoordinates(
+            position.coords.latitude,
+            position.coords.longitude,
+            locationLabel,
+          );
+          await loadWeather();
           setSaveState({
             status: "success",
-            message: "휴대폰 위치가 저장됐습니다. 다음 알림부터 이 위치를 사용합니다.",
+            message:
+              mode === "auto"
+                ? "위치가 자동 저장됐습니다. 이 휴대폰 위치 기준으로 날씨를 갱신했습니다."
+                : "위치를 다시 저장했습니다. 다음 알림부터 이 위치를 사용합니다.",
           });
-          await loadWeather();
         } catch (saveError) {
           setSaveState({
             status: "error",
@@ -155,20 +166,41 @@ export default function Home() {
       () => {
         setSaveState({
           status: "error",
-          message: "위치 권한이 거부됐습니다. 브라우저 설정에서 위치 권한을 허용해 주세요.",
+          message:
+            "위치 권한이 허용되지 않아 기본 위치를 사용합니다. 브라우저에서 위치 권한을 허용하면 자동 갱신됩니다.",
         });
       },
       { enableHighAccuracy: false, maximumAge: 300000, timeout: 15000 },
     );
   }
 
+  useEffect(() => {
+    loadWeather()
+      .catch((loadError) => {
+        setError(
+          loadError instanceof Error
+            ? loadError.message
+            : "날씨 정보를 가져오지 못했습니다.",
+        );
+      })
+      .finally(() => {
+        if (!autoRequested.current) {
+          autoRequested.current = true;
+          collectPhoneLocation("auto");
+        }
+      });
+    // This should run only once on page entry so the browser permission prompt
+    // does not keep reappearing during normal state updates.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   if (!weather) {
     return (
       <main className="app-shell">
         <section className="card loading-panel">
-          <p className="eyebrow">Morning Weather Agent</p>
+          <p className="eyebrow">PlayMCP Weather Agent</p>
           <h1>위치 기반 날씨를 불러오는 중입니다</h1>
-          <p>{error || "저장된 위치가 없으면 서울 성동구 기준으로 먼저 표시합니다."}</p>
+          <p>{error || "저장된 위치가 없으면 기본 위치 기준으로 먼저 표시합니다."}</p>
         </section>
       </main>
     );
@@ -230,21 +262,22 @@ export default function Home() {
               <span className="ready">PlayMCP 연결 확인됨</span>
               <span className={weather.location.source === "saved" ? "ready" : ""}>
                 {weather.location.source === "saved"
-                  ? "휴대폰 위치 저장됨"
-                  : "기본 위치 사용 중"}
+                  ? "자동 위치 저장됨"
+                  : "위치 권한 대기 중"}
               </span>
             </div>
           </div>
         </article>
       </section>
 
-      <section className="location-band card" aria-label="휴대폰 위치 설정">
+      <section className="location-band card" aria-label="자동 위치 설정">
         <div>
-          <p className="section-kicker">Phone Location</p>
-          <h2>카카오톡 받을 휴대폰 위치로 지역 설정</h2>
+          <p className="section-kicker">Auto Location</p>
+          <h2>휴대폰 위치를 자동으로 수집합니다</h2>
           <p>
-            카카오톡이나 PlayMCP가 휴대폰 GPS를 자동으로 읽을 수는 없어서,
-            받을 폰에서 이 페이지를 열고 위치 권한을 한 번 허용해야 합니다.
+            브라우저 정책상 위치는 권한 허용 후에만 읽을 수 있습니다. 이 링크를
+            카카오톡 받을 휴대폰에서 열면 자동으로 위치 권한을 요청하고, 허용된
+            좌표로 날씨를 다시 계산합니다.
           </p>
         </div>
         <div className="location-controls">
@@ -255,8 +288,8 @@ export default function Home() {
             placeholder="예: 집, 회사, 서울 성동구"
             value={label}
           />
-          <button onClick={savePhoneLocation} type="button">
-            이 폰 위치 저장
+          <button onClick={() => collectPhoneLocation("manual")} type="button">
+            위치 다시 수집
           </button>
           <p className={`send-result ${saveState.status}`}>
             {saveState.message}
