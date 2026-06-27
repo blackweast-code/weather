@@ -1,7 +1,7 @@
 "use client";
 
 import type { CSSProperties } from "react";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 type ScenarioKey = "need" | "recommend" | "clear";
 
@@ -28,6 +28,19 @@ type Scenario = {
   message: string;
   reasons: string[];
   forecast: ForecastSlot[];
+};
+
+type KakaoConfigStatus = {
+  restApiKey: boolean;
+  redirectUri: boolean;
+  refreshToken: boolean;
+  authReady: boolean;
+  sendReady: boolean;
+};
+
+type SendState = {
+  status: "idle" | "sending" | "success" | "error";
+  message: string;
 };
 
 const scenarios: Record<ScenarioKey, Scenario> = {
@@ -138,12 +151,85 @@ const statusClass: Record<ScenarioKey, string> = {
 
 export default function Home() {
   const [scenarioKey, setScenarioKey] = useState<ScenarioKey>("need");
+  const [kakaoConfig, setKakaoConfig] = useState<KakaoConfigStatus | null>(null);
+  const [sendState, setSendState] = useState<SendState>({
+    status: "idle",
+    message: "카카오 환경변수 설정 후 실제 메시지를 보낼 수 있습니다.",
+  });
   const scenario = scenarios[scenarioKey];
 
   const maxPop = useMemo(
     () => Math.max(...scenario.forecast.map((slot) => slot.pop)),
     [scenario],
   );
+
+  useEffect(() => {
+    let ignore = false;
+
+    fetch("/api/kakao/status")
+      .then((response) => response.json())
+      .then((payload: { configured?: KakaoConfigStatus }) => {
+        if (!ignore && payload.configured) {
+          setKakaoConfig(payload.configured);
+        }
+      })
+      .catch(() => {
+        if (!ignore) {
+          setSendState({
+            status: "error",
+            message: "카카오 연결 상태를 불러오지 못했습니다.",
+          });
+        }
+      });
+
+    return () => {
+      ignore = true;
+    };
+  }, []);
+
+  async function sendKakaoTest() {
+    setSendState({ status: "sending", message: "카카오톡으로 발송 중입니다." });
+
+    try {
+      const response = await fetch("/api/kakao/send", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          region: scenario.region,
+          decision: scenario.decision,
+          summary: scenario.summary,
+          high: scenario.high,
+          low: scenario.low,
+          maxPop,
+          detailUrl: window.location.href,
+        }),
+      });
+      const payload = (await response.json()) as {
+        ok?: boolean;
+        error?: string;
+        rotatedRefreshToken?: boolean;
+      };
+
+      if (!response.ok || !payload.ok) {
+        throw new Error(payload.error || "발송에 실패했습니다.");
+      }
+
+      setSendState({
+        status: "success",
+        message: payload.rotatedRefreshToken
+          ? "발송 성공. 새 refresh token이 발급되어 환경변수 갱신이 필요합니다."
+          : "카카오톡 나에게 보내기 발송이 완료됐습니다.",
+      });
+    } catch (error) {
+      setSendState({
+        status: "error",
+        message:
+          error instanceof Error ? error.message : "카카오톡 발송에 실패했습니다.",
+      });
+    }
+  }
 
   return (
     <main className="app-shell">
@@ -193,6 +279,40 @@ export default function Home() {
             <span>카카오톡 알림</span>
             <strong>{scenario.kakaoStatus}</strong>
             <p>{scenario.message}</p>
+            <div className="kakao-actions">
+              <div className="kakao-status-grid">
+                <span className={kakaoConfig?.restApiKey ? "ready" : ""}>
+                  REST API 키
+                </span>
+                <span className={kakaoConfig?.redirectUri ? "ready" : ""}>
+                  Redirect URI
+                </span>
+                <span className={kakaoConfig?.refreshToken ? "ready" : ""}>
+                  Refresh Token
+                </span>
+              </div>
+              <div className="kakao-button-row">
+                <button
+                  disabled={!kakaoConfig?.authReady}
+                  onClick={() => {
+                    window.location.href = "/api/kakao/auth-url";
+                  }}
+                  type="button"
+                >
+                  카카오 연결
+                </button>
+                <button
+                  disabled={sendState.status === "sending"}
+                  onClick={sendKakaoTest}
+                  type="button"
+                >
+                  테스트 발송
+                </button>
+              </div>
+              <p className={`send-result ${sendState.status}`}>
+                {sendState.message}
+              </p>
+            </div>
           </div>
         </article>
       </section>
