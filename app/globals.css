@@ -352,6 +352,52 @@ h3 {
   color: var(--muted);
 }
 
+.current-location-pin {
+  align-items: center;
+  display: grid;
+  gap: 5px;
+  justify-items: center;
+  left: 50%;
+  pointer-events: none;
+  position: absolute;
+  top: 50%;
+  transform: translate(-50%, -92%);
+  z-index: 4;
+}
+
+.current-location-pin span {
+  background: #185adb;
+  border: 3px solid #ffffff;
+  border-radius: 50% 50% 50% 0;
+  box-shadow: 0 8px 18px rgba(0, 0, 0, 0.28);
+  display: block;
+  height: 28px;
+  transform: rotate(-45deg);
+  width: 28px;
+}
+
+.current-location-pin span::after {
+  background: #ffffff;
+  border-radius: 50%;
+  content: "";
+  height: 8px;
+  left: 7px;
+  position: absolute;
+  top: 7px;
+  width: 8px;
+}
+
+.current-location-pin strong {
+  background: #ffffff;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  box-shadow: 0 6px 14px rgba(0, 0, 0, 0.16);
+  color: var(--ink);
+  font-size: 0.76rem;
+  padding: 4px 8px;
+  white-space: nowrap;
+}
+
 .map-legend {
   align-items: center;
   display: flex;

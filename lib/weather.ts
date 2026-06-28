@@ -1,6 +1,9 @@
+import { fetchKmaWeather, isKmaConfigured } from "@/lib/kma";
+
 export type SavedLocation = {
   label: string;
   address?: string;
+  addressSource?: string;
   locality?: string;
   latitude: number;
   longitude: number;
@@ -46,6 +49,7 @@ export type WeatherSourceInfo = {
   weather: string;
   address: string;
   map: string;
+  koreaRecommendation: string;
 };
 
 export type UmbrellaDecision = {
@@ -122,6 +126,20 @@ function skyLabel(code: number) {
   return "흐림";
 }
 
+function hasFinalConsonant(value: string) {
+  const last = value.trim().at(-1);
+  if (!last) return false;
+
+  const code = last.charCodeAt(0);
+  if (code < 0xac00 || code > 0xd7a3) return false;
+
+  return (code - 0xac00) % 28 !== 0;
+}
+
+function withTopicParticle(value: string) {
+  return `${value}${hasFinalConsonant(value) ? "은" : "는"}`;
+}
+
 function findNearestIndex(times: string[], targetHour: number) {
   let bestIndex = 0;
   let bestDistance = Number.POSITIVE_INFINITY;
@@ -193,7 +211,7 @@ function decideUmbrella(location: SavedLocation, forecast: ForecastSlot[]) {
       label: "필요",
       title: "우산 필요",
       level: 3,
-      summary: `${location.label}은 ${firstWet.time} 전후 비 가능성이 있어 우산이 필요합니다.`,
+      summary: `${withTopicParticle(location.label)} ${firstWet.time} 전후 비 가능성이 있어 우산이 필요합니다.`,
       detail:
         "강수형태, 강수확률, 예상 강수량 중 하나 이상이 기준을 넘어 보수적으로 필요로 판단했습니다.",
       reasons: [
@@ -211,7 +229,7 @@ function decideUmbrella(location: SavedLocation, forecast: ForecastSlot[]) {
       label: "권장",
       title: "휴대용 우산 권장",
       level: 2,
-      summary: `${location.label}은 강수확률이 애매해 휴대용 우산을 권장합니다.`,
+      summary: `${withTopicParticle(location.label)} 강수확률이 애매해 휴대용 우산을 권장합니다.`,
       detail:
         "40~59% 강수확률이 반복되거나 이동 시간대에 걸쳐 있어 권장으로 안내합니다.",
       reasons: [
@@ -228,7 +246,7 @@ function decideUmbrella(location: SavedLocation, forecast: ForecastSlot[]) {
     label: "불필요",
     title: "우산 불필요",
     level: 1,
-    summary: `${location.label}은 오늘 강수 가능성이 낮아 우산이 필요하지 않습니다.`,
+    summary: `${withTopicParticle(location.label)} 오늘 강수 가능성이 낮아 우산이 필요하지 않습니다.`,
     detail:
       "전 시간대 강수확률이 낮고 강수형태가 없어 일반 이동에는 우산 없이도 충분합니다.",
     reasons: [
@@ -241,6 +259,41 @@ function decideUmbrella(location: SavedLocation, forecast: ForecastSlot[]) {
 }
 
 export async function fetchWeather(location: SavedLocation): Promise<WeatherResult> {
+  if (isKmaConfigured()) {
+    try {
+      const weather = await fetchKmaWeather(location);
+      const decision = decideUmbrella(location, weather.forecast);
+
+      return {
+        location,
+        baseTime: new Date().toLocaleString("ko-KR", { timeZone: "Asia/Seoul" }),
+        high: weather.high,
+        low: weather.low,
+        maxPop: weather.maxPop,
+        forecast: weather.forecast,
+        hourly: weather.hourly,
+        precipitationMap: weather.precipitationMap,
+        sourceInfo: {
+          weather: "기상청 단기예보 조회서비스",
+          address: location.addressSource ?? "OpenStreetMap Nominatim",
+          map: "OpenStreetMap + 기상청 격자 예보",
+          koreaRecommendation:
+            "기상청 단기예보 조회서비스를 사용 중입니다. 초단기/단기 예보가 한국 격자 기준으로 반영됩니다.",
+        },
+        decision,
+      };
+    } catch (error) {
+      return fetchOpenMeteoWeather(location, error);
+    }
+  }
+
+  return fetchOpenMeteoWeather(location);
+}
+
+async function fetchOpenMeteoWeather(
+  location: SavedLocation,
+  fallbackReason?: unknown,
+): Promise<WeatherResult> {
   const url = new URL("https://api.open-meteo.com/v1/forecast");
   url.searchParams.set("latitude", String(location.latitude));
   url.searchParams.set("longitude", String(location.longitude));
@@ -289,9 +342,15 @@ export async function fetchWeather(location: SavedLocation): Promise<WeatherResu
     hourly: hourlyTimeline,
     precipitationMap,
     sourceInfo: {
-      weather: "Open-Meteo Forecast API",
-      address: "OpenStreetMap Nominatim",
+      weather: fallbackReason
+        ? "Open-Meteo Forecast API (기상청 fallback)"
+        : "Open-Meteo Forecast API",
+      address: location.addressSource ?? "OpenStreetMap Nominatim",
       map: "OpenStreetMap",
+      koreaRecommendation:
+        fallbackReason instanceof Error
+          ? `기상청 API 응답 오류로 임시 fallback 중입니다: ${fallbackReason.message}`
+          : "한국 정밀 예보를 쓰려면 Vercel에 KMA_SERVICE_KEY를 설정하세요.",
     },
     decision,
   };

@@ -56,7 +56,7 @@ export function normalizeLocation(
 
 export function withResolvedAddress(
   location: SavedLocation,
-  address: { label: string; address: string; locality: string } | null,
+  address: { label: string; address: string; locality: string; source: string } | null,
 ) {
   if (!address) return location;
   const isGenericLabel =
@@ -66,6 +66,7 @@ export function withResolvedAddress(
     ...location,
     label: isGenericLabel ? address.label : location.label,
     address: address.address,
+    addressSource: address.source,
     locality: address.locality,
   };
 }
@@ -107,6 +108,7 @@ function locationFromCookie(request: Request) {
     return {
       ...location,
       address: parsed.address,
+      addressSource: parsed.addressSource,
       locality: parsed.locality,
     };
   } catch {

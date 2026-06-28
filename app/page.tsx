@@ -56,6 +56,7 @@ type WeatherData = {
     weather: string;
     address: string;
     map: string;
+    koreaRecommendation: string;
   };
   decision: {
     key: "need" | "recommend" | "clear";
@@ -392,6 +393,10 @@ export default function Home() {
                 <small>{spot.pop}%</small>
               </div>
             ))}
+            <div className="current-location-pin" aria-label="내 정확한 위치">
+              <span />
+              <strong>내 위치</strong>
+            </div>
           </div>
           <div className="map-legend">
             <span>0mm</span>
@@ -519,6 +524,7 @@ export default function Home() {
             <small>
               주소 {weather.sourceInfo.address} · 지도 {weather.sourceInfo.map}
             </small>
+            <small>{weather.sourceInfo.koreaRecommendation}</small>
           </div>
         </article>
       </section>
