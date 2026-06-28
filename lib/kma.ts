@@ -45,15 +45,15 @@ const KMA_BASE_URL =
 const VILLAGE_BASE_TIMES = ["0200", "0500", "0800", "1100", "1400", "1700", "2000", "2300"];
 
 const MAP_SAMPLES = [
-  { id: "nw", label: "북서", lat: 0.055, lon: -0.07, x: 22, y: 24 },
-  { id: "n", label: "북쪽", lat: 0.06, lon: 0, x: 50, y: 19 },
-  { id: "ne", label: "북동", lat: 0.055, lon: 0.07, x: 78, y: 24 },
-  { id: "w", label: "서쪽", lat: 0, lon: -0.075, x: 17, y: 50 },
-  { id: "c", label: "현재 위치", lat: 0, lon: 0, x: 50, y: 50 },
-  { id: "e", label: "동쪽", lat: 0, lon: 0.075, x: 83, y: 50 },
-  { id: "sw", label: "남서", lat: -0.055, lon: -0.07, x: 22, y: 76 },
-  { id: "s", label: "남쪽", lat: -0.06, lon: 0, x: 50, y: 81 },
-  { id: "se", label: "남동", lat: -0.055, lon: 0.07, x: 78, y: 76 },
+  { id: "nw", label: "북서 약 8km", lat: 0.055, lon: -0.07, x: 22, y: 24 },
+  { id: "n", label: "북쪽 약 6km", lat: 0.06, lon: 0, x: 50, y: 19 },
+  { id: "ne", label: "북동 약 8km", lat: 0.055, lon: 0.07, x: 78, y: 24 },
+  { id: "w", label: "서쪽 약 7km", lat: 0, lon: -0.075, x: 17, y: 50 },
+  { id: "c", label: "내 위치 격자", lat: 0, lon: 0, x: 50, y: 50 },
+  { id: "e", label: "동쪽 약 7km", lat: 0, lon: 0.075, x: 83, y: 50 },
+  { id: "sw", label: "남서 약 8km", lat: -0.055, lon: -0.07, x: 22, y: 76 },
+  { id: "s", label: "남쪽 약 6km", lat: -0.06, lon: 0, x: 50, y: 81 },
+  { id: "se", label: "남동 약 8km", lat: -0.055, lon: 0.07, x: 78, y: 76 },
 ];
 
 function kmaServiceKey() {
@@ -259,6 +259,7 @@ function buildSlots(items: KmaItem[]) {
           precipitation,
           humidity: Math.round(parseNumber(group.REH)),
           wind: Math.round(parseNumber(group.WSD)),
+          windDirection: Math.round(parseNumber(group.VEC)),
         } satisfies ForecastSlot,
       };
     })

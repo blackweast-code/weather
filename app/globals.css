@@ -300,7 +300,7 @@ h3 {
   display: grid;
   gap: 2px;
   left: var(--x);
-  min-width: 76px;
+  min-width: 88px;
   padding: 7px 8px;
   pointer-events: none;
   position: absolute;
@@ -311,7 +311,8 @@ h3 {
 }
 
 .rain-spot strong {
-  font-size: 0.75rem;
+  font-size: 0.72rem;
+  line-height: 1.25;
 }
 
 .rain-spot span {
@@ -710,6 +711,7 @@ h3 {
   justify-items: center;
   min-height: 150px;
   padding: 8px 12px;
+  position: relative;
   text-align: center;
 }
 
@@ -738,6 +740,83 @@ h3 {
   font-size: 0.74rem;
   font-style: normal;
   font-weight: 800;
+}
+
+.hour-card.weather-mode::before {
+  background: #d5dce2;
+  content: "";
+  height: 2px;
+  left: 0;
+  position: absolute;
+  right: 0;
+  top: 34px;
+}
+
+.rain-mode,
+.wind-mode,
+.humidity-mode {
+  align-content: end;
+  gap: 7px;
+}
+
+.rain-drop {
+  background: #dce8ff;
+  border-radius: 50% 50% 50% 0;
+  display: block;
+  height: 22px;
+  transform: rotate(-45deg);
+  width: 22px;
+}
+
+.rain-mode strong {
+  color: #5b74f2;
+  font-size: 0.86rem;
+}
+
+.metric-column {
+  align-self: end;
+  border-radius: 4px 4px 0 0;
+  height: var(--bar);
+  min-height: 6px;
+  width: 100%;
+}
+
+.rain-column {
+  background: linear-gradient(180deg, #bcd0ff, #89a8f6);
+  max-height: 70px;
+}
+
+.wind-arrow {
+  background: #2fb4c0;
+  clip-path: polygon(0 40%, 72% 40%, 72% 15%, 100% 50%, 72% 85%, 72% 60%, 0 60%);
+  display: block;
+  height: 28px;
+  transform: rotate(var(--wind));
+  width: 42px;
+}
+
+.wind-mode strong {
+  color: #238d99;
+  font-size: 0.8rem;
+}
+
+.wind-column {
+  background: linear-gradient(180deg, #87dce2, #31b7c4);
+  max-height: 62px;
+}
+
+.humidity-mode strong {
+  color: #236a86;
+  font-size: 0.86rem;
+}
+
+.humidity-mode small {
+  color: #236a86;
+}
+
+.humidity-column {
+  background: linear-gradient(180deg, #c6f0fa, #66cfe5);
+  max-height: 82px;
 }
 
 .weather-icon {

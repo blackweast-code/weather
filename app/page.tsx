@@ -14,6 +14,7 @@ type ForecastSlot = {
   precipitation: number;
   humidity: number;
   wind: number;
+  windDirection: number;
 };
 
 type PrecipitationSpot = {
@@ -127,6 +128,26 @@ function timelineMetric(slot: ForecastSlot, mode: TimelineMode) {
   return slot.type === "없음" ? slot.sky : slot.type;
 }
 
+function windDirectionLabel(degrees: number) {
+  const directions = [
+    "북풍",
+    "북동풍",
+    "동풍",
+    "남동풍",
+    "남풍",
+    "남서풍",
+    "서풍",
+    "북서풍",
+  ];
+  const index = Math.round(((degrees % 360) / 45)) % directions.length;
+
+  return directions[index];
+}
+
+function barPercent(value: number, max: number) {
+  return `${Math.min(100, Math.max(8, (value / max) * 100))}%`;
+}
+
 function rainIntensity(spot: PrecipitationSpot) {
   if (spot.precipitation >= 3 || spot.pop >= 70) return "heavy";
   if (spot.precipitation >= 1 || spot.pop >= 50) return "mid";
@@ -146,7 +167,7 @@ function openStreetMapUrl(location: WeatherData["location"]) {
     lat + latPad,
   ].join(",");
 
-  return `https://www.openstreetmap.org/export/embed.html?bbox=${bbox}&layer=mapnik&marker=${lat},${lon}`;
+  return `https://www.openstreetmap.org/export/embed.html?bbox=${bbox}&layer=mapnik`;
 }
 
 export default function Home() {
@@ -488,18 +509,73 @@ export default function Home() {
             ))}
           </div>
 
-          <div className="hourly-strip" aria-label="시간별 날씨 표">
-            {weather.hourly.map((slot, index) => (
-              <div className="hour-card" key={`${slot.time}-${index}`}>
-                <strong>{slot.temp}°</strong>
-                <div className={`weather-icon ${slotIconClass(slot)}`}>
-                  <span />
+          <div className={`hourly-strip ${timelineMode}`} aria-label="시간별 날씨 표">
+            {weather.hourly.map((slot, index) => {
+              const displayTime = index === 0 ? "지금" : `${slot.time.slice(0, 2)}시`;
+
+              if (timelineMode === "rain") {
+                return (
+                  <div className="hour-card rain-mode" key={`${slot.time}-${index}`}>
+                    <span className="rain-drop" />
+                    <strong>{slot.pop > 0 ? `${slot.pop}%` : "-"}</strong>
+                    <small>{slot.precipitation > 0 ? slot.precipitation.toFixed(1) : "0"}</small>
+                    <div
+                      className="metric-column rain-column"
+                      style={{ "--bar": barPercent(slot.precipitation, 5) } as CSSProperties}
+                    />
+                    <time>{displayTime}</time>
+                  </div>
+                );
+              }
+
+              if (timelineMode === "wind") {
+                return (
+                  <div className="hour-card wind-mode" key={`${slot.time}-${index}`}>
+                    <span
+                      className="wind-arrow"
+                      style={
+                        {
+                          "--wind": `${(slot.windDirection + 270) % 360}deg`,
+                        } as CSSProperties
+                      }
+                    />
+                    <strong>{windDirectionLabel(slot.windDirection)}</strong>
+                    <small>{slot.wind} m/s</small>
+                    <div
+                      className="metric-column wind-column"
+                      style={{ "--bar": barPercent(slot.wind, 12) } as CSSProperties}
+                    />
+                    <time>{displayTime}</time>
+                  </div>
+                );
+              }
+
+              if (timelineMode === "humidity") {
+                return (
+                  <div className="hour-card humidity-mode" key={`${slot.time}-${index}`}>
+                    <strong>{slot.humidity}</strong>
+                    <small>%</small>
+                    <div
+                      className="metric-column humidity-column"
+                      style={{ "--bar": barPercent(slot.humidity, 100) } as CSSProperties}
+                    />
+                    <time>{displayTime}</time>
+                  </div>
+                );
+              }
+
+              return (
+                <div className="hour-card weather-mode" key={`${slot.time}-${index}`}>
+                  <strong>{slot.temp}°</strong>
+                  <div className={`weather-icon ${slotIconClass(slot)}`}>
+                    <span />
+                  </div>
+                  <time>{displayTime}</time>
+                  <small>{timelineMetric(slot, timelineMode)}</small>
+                  <em>{slot.pop}%</em>
                 </div>
-                <time>{index === 0 ? "지금" : slot.time.slice(0, 2) + "시"}</time>
-                <small>{timelineMetric(slot, timelineMode)}</small>
-                <em>{slot.pop}%</em>
-              </div>
-            ))}
+              );
+            })}
           </div>
         </article>
 

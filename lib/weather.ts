@@ -22,6 +22,7 @@ export type ForecastSlot = {
   precipitation: number;
   humidity: number;
   wind: number;
+  windDirection: number;
 };
 
 export type PrecipitationSpot = {
@@ -85,6 +86,7 @@ type OpenMeteoResponse = {
     weather_code?: number[];
     relative_humidity_2m?: number[];
     wind_speed_10m?: number[];
+    wind_direction_10m?: number[];
   };
 };
 
@@ -165,6 +167,7 @@ function makeSlot(hourly: Required<OpenMeteoResponse>["hourly"], index: number) 
   const code = hourly.weather_code?.[index] ?? 0;
   const humidity = Math.round(hourly.relative_humidity_2m?.[index] ?? 0);
   const wind = Math.round(hourly.wind_speed_10m?.[index] ?? 0);
+  const windDirection = Math.round(hourly.wind_direction_10m?.[index] ?? 0);
 
   return {
     time: time.slice(11, 16) || "--:--",
@@ -177,6 +180,7 @@ function makeSlot(hourly: Required<OpenMeteoResponse>["hourly"], index: number) 
     precipitation,
     humidity,
     wind,
+    windDirection,
   };
 }
 
@@ -299,7 +303,7 @@ async function fetchOpenMeteoWeather(
   url.searchParams.set("longitude", String(location.longitude));
   url.searchParams.set(
     "hourly",
-    "temperature_2m,precipitation_probability,precipitation,weather_code,relative_humidity_2m,wind_speed_10m",
+    "temperature_2m,precipitation_probability,precipitation,weather_code,relative_humidity_2m,wind_speed_10m,wind_direction_10m",
   );
   url.searchParams.set("timezone", "Asia/Seoul");
   url.searchParams.set("forecast_days", "1");
@@ -357,15 +361,15 @@ async function fetchOpenMeteoWeather(
 }
 
 const MAP_SAMPLES = [
-  { id: "nw", label: "북서", lat: 0.055, lon: -0.07, x: 22, y: 24 },
-  { id: "n", label: "북쪽", lat: 0.06, lon: 0, x: 50, y: 19 },
-  { id: "ne", label: "북동", lat: 0.055, lon: 0.07, x: 78, y: 24 },
-  { id: "w", label: "서쪽", lat: 0, lon: -0.075, x: 17, y: 50 },
-  { id: "c", label: "현재 위치", lat: 0, lon: 0, x: 50, y: 50 },
-  { id: "e", label: "동쪽", lat: 0, lon: 0.075, x: 83, y: 50 },
-  { id: "sw", label: "남서", lat: -0.055, lon: -0.07, x: 22, y: 76 },
-  { id: "s", label: "남쪽", lat: -0.06, lon: 0, x: 50, y: 81 },
-  { id: "se", label: "남동", lat: -0.055, lon: 0.07, x: 78, y: 76 },
+  { id: "nw", label: "북서 약 8km", lat: 0.055, lon: -0.07, x: 22, y: 24 },
+  { id: "n", label: "북쪽 약 6km", lat: 0.06, lon: 0, x: 50, y: 19 },
+  { id: "ne", label: "북동 약 8km", lat: 0.055, lon: 0.07, x: 78, y: 24 },
+  { id: "w", label: "서쪽 약 7km", lat: 0, lon: -0.075, x: 17, y: 50 },
+  { id: "c", label: "내 위치 격자", lat: 0, lon: 0, x: 50, y: 50 },
+  { id: "e", label: "동쪽 약 7km", lat: 0, lon: 0.075, x: 83, y: 50 },
+  { id: "sw", label: "남서 약 8km", lat: -0.055, lon: -0.07, x: 22, y: 76 },
+  { id: "s", label: "남쪽 약 6km", lat: -0.06, lon: 0, x: 50, y: 81 },
+  { id: "se", label: "남동 약 8km", lat: -0.055, lon: 0.07, x: 78, y: 76 },
 ];
 
 async function fetchSpot(location: SavedLocation, sample: (typeof MAP_SAMPLES)[number], index: number) {
@@ -376,7 +380,7 @@ async function fetchSpot(location: SavedLocation, sample: (typeof MAP_SAMPLES)[n
   url.searchParams.set("longitude", String(longitude));
   url.searchParams.set(
     "hourly",
-    "temperature_2m,precipitation_probability,precipitation,weather_code,relative_humidity_2m,wind_speed_10m",
+    "temperature_2m,precipitation_probability,precipitation,weather_code,relative_humidity_2m,wind_speed_10m,wind_direction_10m",
   );
   url.searchParams.set("timezone", "Asia/Seoul");
   url.searchParams.set("forecast_days", "1");
@@ -433,6 +437,7 @@ async function fetchPrecipitationMap(
       precipitation: 0,
       sky: "확인 중",
       type: "없음",
+      windDirection: 0,
     }));
 
     return {
