@@ -7,9 +7,12 @@ import type {
 
 type KmaItem = {
   category: string;
-  fcstDate: string;
-  fcstTime: string;
-  fcstValue: string;
+  fcstDate?: string;
+  fcstTime?: string;
+  fcstValue?: string;
+  baseDate?: string;
+  baseTime?: string;
+  obsrValue?: string;
 };
 
 type KmaResponse = {
@@ -40,9 +43,23 @@ type KmaForecastBundle = {
   precipitationMap: PrecipitationMap;
 };
 
+type KeyedSlot = {
+  key: string;
+  slot: ForecastSlot;
+};
+
 const KMA_BASE_URL =
   "https://apis.data.go.kr/1360000/VilageFcstInfoService_2.0";
-const VILLAGE_BASE_TIMES = ["0200", "0500", "0800", "1100", "1400", "1700", "2000", "2300"];
+const VILLAGE_BASE_TIMES = [
+  "0200",
+  "0500",
+  "0800",
+  "1100",
+  "1400",
+  "1700",
+  "2000",
+  "2300",
+];
 
 const MAP_SAMPLES = [
   { id: "nw", label: "북서 약 8km", lat: 0.055, lon: -0.07, x: 22, y: 24 },
@@ -71,34 +88,56 @@ export function isKmaConfigured() {
   return Boolean(kmaServiceKey());
 }
 
-function formatKstDate(date = new Date()) {
+function kstParts(date = new Date()) {
   const parts = new Intl.DateTimeFormat("en-CA", {
     timeZone: "Asia/Seoul",
     year: "numeric",
     month: "2-digit",
     day: "2-digit",
-  }).formatToParts(date);
-  const value = Object.fromEntries(parts.map((part) => [part.type, part.value]));
-
-  return `${value.year}${value.month}${value.day}`;
-}
-
-function kstTimeParts() {
-  const parts = new Intl.DateTimeFormat("en-GB", {
-    timeZone: "Asia/Seoul",
     hour: "2-digit",
     minute: "2-digit",
     hour12: false,
-  }).formatToParts(new Date());
-  const value = Object.fromEntries(parts.map((part) => [part.type, part.value]));
+    hourCycle: "h23",
+  }).formatToParts(date);
 
-  return {
-    hour: Number(value.hour),
-    minute: Number(value.minute),
+  return Object.fromEntries(parts.map((part) => [part.type, part.value])) as {
+    year: string;
+    month: string;
+    day: string;
+    hour: string;
+    minute: string;
   };
 }
 
-function latestBaseDateTime() {
+function kstNowDate() {
+  const parts = kstParts();
+
+  return new Date(
+    `${parts.year}-${parts.month}-${parts.day}T${parts.hour}:${parts.minute}:00+09:00`,
+  );
+}
+
+function formatKstDate(date = new Date()) {
+  const parts = kstParts(date);
+
+  return `${parts.year}${parts.month}${parts.day}`;
+}
+
+function formatKstHour(date = new Date()) {
+  return kstParts(date).hour.padStart(2, "0");
+}
+
+function kstTimeParts() {
+  const parts = kstParts();
+
+  return {
+    hour: Number(parts.hour),
+    minute: Number(parts.minute),
+  };
+}
+
+function latestVillageBaseDateTime() {
+  const now = kstNowDate();
   const { hour, minute } = kstTimeParts();
   const nowMinutes = hour * 60 + minute;
   const bufferMinutes = 15;
@@ -111,13 +150,36 @@ function latestBaseDateTime() {
     .find((candidate) => nowMinutes - bufferMinutes >= candidate.minutes);
 
   if (base) {
-    return { baseDate: formatKstDate(), baseTime: base.time };
+    return { baseDate: formatKstDate(now), baseTime: base.time };
   }
 
   return {
-    baseDate: formatKstDate(new Date(Date.now() - 24 * 60 * 60 * 1000)),
+    baseDate: formatKstDate(new Date(now.getTime() - 24 * 60 * 60 * 1000)),
     baseTime: VILLAGE_BASE_TIMES.at(-1) ?? "2300",
   };
+}
+
+function latestHourlyBaseCandidates(
+  minuteMark: "00" | "30",
+  availableAfterMinute: number,
+  count = 3,
+) {
+  const now = kstNowDate();
+  const { minute } = kstTimeParts();
+  let base = now;
+
+  if (minute < availableAfterMinute) {
+    base = new Date(base.getTime() - 60 * 60 * 1000);
+  }
+
+  return Array.from({ length: count }, (_, index) => {
+    const candidate = new Date(base.getTime() - index * 60 * 60 * 1000);
+
+    return {
+      baseDate: formatKstDate(candidate),
+      baseTime: `${formatKstHour(candidate)}${minuteMark}`,
+    };
+  });
 }
 
 export function toKmaGrid(latitude: number, longitude: number): KmaGrid {
@@ -162,13 +224,18 @@ export function toKmaGrid(latitude: number, longitude: number): KmaGrid {
   };
 }
 
-async function fetchVillageItems(latitude: number, longitude: number) {
+async function fetchKmaItems(
+  endpoint: "getUltraSrtNcst" | "getUltraSrtFcst" | "getVilageFcst",
+  latitude: number,
+  longitude: number,
+  baseDate: string,
+  baseTime: string,
+) {
   const serviceKey = kmaServiceKey();
   if (!serviceKey) throw new Error("KMA_SERVICE_KEY가 설정되지 않았습니다.");
 
-  const { baseDate, baseTime } = latestBaseDateTime();
   const { nx, ny } = toKmaGrid(latitude, longitude);
-  const url = new URL(`${KMA_BASE_URL}/getVilageFcst`);
+  const url = new URL(`${KMA_BASE_URL}/${endpoint}`);
   url.searchParams.set("serviceKey", serviceKey);
   url.searchParams.set("pageNo", "1");
   url.searchParams.set("numOfRows", "1000");
@@ -179,17 +246,72 @@ async function fetchVillageItems(latitude: number, longitude: number) {
   url.searchParams.set("ny", String(ny));
 
   const response = await fetch(url, { next: { revalidate: 60 * 10 } });
-  if (!response.ok) throw new Error("기상청 예보를 가져오지 못했습니다.");
+  if (!response.ok) throw new Error("기상청 데이터를 가져오지 못했습니다.");
 
   const data = (await response.json()) as KmaResponse;
   const header = data.response?.header;
   if (header?.resultCode && header.resultCode !== "00") {
-    throw new Error(header.resultMsg || "기상청 예보 응답이 올바르지 않습니다.");
+    throw new Error(header.resultMsg || "기상청 응답이 올바르지 않습니다.");
   }
 
   const items = data.response?.body?.items?.item ?? [];
 
   return Array.isArray(items) ? items : [items];
+}
+
+async function fetchKmaItemsWithCandidates(
+  endpoint: "getUltraSrtNcst" | "getUltraSrtFcst",
+  latitude: number,
+  longitude: number,
+  candidates: Array<{ baseDate: string; baseTime: string }>,
+) {
+  let lastError: unknown;
+
+  for (const candidate of candidates) {
+    try {
+      return await fetchKmaItems(
+        endpoint,
+        latitude,
+        longitude,
+        candidate.baseDate,
+        candidate.baseTime,
+      );
+    } catch (error) {
+      lastError = error;
+    }
+  }
+
+  throw lastError instanceof Error
+    ? lastError
+    : new Error("기상청 초단기 데이터를 가져오지 못했습니다.");
+}
+
+async function fetchVillageItems(latitude: number, longitude: number) {
+  const { baseDate, baseTime } = latestVillageBaseDateTime();
+
+  return fetchKmaItems("getVilageFcst", latitude, longitude, baseDate, baseTime);
+}
+
+async function fetchUltraNowcastItems(latitude: number, longitude: number) {
+  return fetchKmaItemsWithCandidates(
+    "getUltraSrtNcst",
+    latitude,
+    longitude,
+    latestHourlyBaseCandidates("00", 45),
+  );
+}
+
+async function fetchUltraForecastItems(latitude: number, longitude: number) {
+  return fetchKmaItemsWithCandidates(
+    "getUltraSrtFcst",
+    latitude,
+    longitude,
+    latestHourlyBaseCandidates("30", 45),
+  );
+}
+
+function itemValue(item: KmaItem) {
+  return item.fcstValue ?? item.obsrValue ?? "";
 }
 
 function ptyLabel(value?: string) {
@@ -207,12 +329,13 @@ function skyLabel(value?: string) {
   if (value === "1") return "맑음";
   if (value === "3") return "구름많음";
   if (value === "4") return "흐림";
-  return "확인 중";
+  return "실황";
 }
 
 function parseNumber(value?: string) {
   if (!value) return 0;
   const number = Number(value);
+
   return Number.isFinite(number) ? number : 0;
 }
 
@@ -221,48 +344,74 @@ function parsePrecipitation(value?: string) {
   if (value.includes("1mm 미만")) return 0.5;
 
   const match = value.match(/\d+(\.\d+)?/);
+
   return match ? Number(match[0]) : 0;
 }
 
 function precipitationAmount(value?: string) {
-  if (!value || value.includes("강수없음")) return "0mm";
-  return value;
+  const precipitation = parsePrecipitation(value);
+  if (!precipitation) return "0mm";
+  if (value?.includes("mm")) return value;
+
+  return `${precipitation.toFixed(1)}mm`;
 }
 
-function buildSlots(items: KmaItem[]) {
+function derivedPop(type: string, precipitation: number, sky: string, pop?: string) {
+  if (pop !== undefined) return parseNumber(pop);
+  if (precipitation >= 3) return 80;
+  if (precipitation > 0) return 70;
+  if (type !== "없음") return 60;
+  if (sky === "흐림") return 30;
+  if (sky === "구름많음") return 20;
+
+  return 0;
+}
+
+function groupItems(items: KmaItem[], source: "forecast" | "nowcast") {
   const groups = new Map<string, Record<string, string>>();
 
   items.forEach((item) => {
-    const key = `${item.fcstDate}${item.fcstTime}`;
+    const date = source === "nowcast" ? item.baseDate : item.fcstDate;
+    const time = source === "nowcast" ? item.baseTime : item.fcstTime;
+    if (!date || !time) return;
+
+    const key = `${date}${time}`;
     const group = groups.get(key) ?? {};
-    group[item.category] = item.fcstValue;
+    group[item.category] = itemValue(item);
     groups.set(key, group);
   });
 
-  return [...groups.entries()]
-    .sort(([left], [right]) => left.localeCompare(right))
-    .map(([key, group]) => {
-      const type = ptyLabel(group.PTY);
-      const sky = type === "없음" ? skyLabel(group.SKY) : type;
-      const precipitation = parsePrecipitation(group.PCP);
+  return groups;
+}
 
-      return {
-        key,
-        slot: {
-          time: `${key.slice(8, 10)}:${key.slice(10, 12)}`,
-          pop: parseNumber(group.POP),
-          type,
-          temp: Math.round(parseNumber(group.TMP)),
-          amount: precipitationAmount(group.PCP),
-          sky,
-          code: parseNumber(group.PTY) * 10 + parseNumber(group.SKY),
-          precipitation,
-          humidity: Math.round(parseNumber(group.REH)),
-          wind: Math.round(parseNumber(group.WSD)),
-          windDirection: Math.round(parseNumber(group.VEC)),
-        } satisfies ForecastSlot,
-      };
-    })
+function slotFromGroup(key: string, group: Record<string, string>): KeyedSlot {
+  const type = ptyLabel(group.PTY);
+  const sky = type === "없음" ? skyLabel(group.SKY) : type;
+  const precipitationRaw = group.PCP ?? group.RN1;
+  const precipitation = parsePrecipitation(precipitationRaw);
+
+  return {
+    key,
+    slot: {
+      time: `${key.slice(8, 10)}:${key.slice(10, 12)}`,
+      pop: derivedPop(type, precipitation, sky, group.POP),
+      type,
+      temp: Math.round(parseNumber(group.TMP ?? group.T1H)),
+      amount: precipitationAmount(precipitationRaw),
+      sky,
+      code: parseNumber(group.PTY) * 10 + parseNumber(group.SKY),
+      precipitation,
+      humidity: Math.round(parseNumber(group.REH)),
+      wind: Math.round(parseNumber(group.WSD)),
+      windDirection: Math.round(parseNumber(group.VEC)),
+    },
+  };
+}
+
+function buildSlots(items: KmaItem[], source: "forecast" | "nowcast") {
+  return [...groupItems(items, source).entries()]
+    .sort(([left], [right]) => left.localeCompare(right))
+    .map(([key, group]) => slotFromGroup(key, group))
     .filter(({ slot }) => Number.isFinite(slot.temp));
 }
 
@@ -273,12 +422,62 @@ function currentForecastKey() {
   return `${date}${String(hour).padStart(2, "0")}00`;
 }
 
-function nextSlots(items: KmaItem[]) {
-  const nowKey = currentForecastKey();
-  const slots = buildSlots(items);
-  const upcoming = slots.filter(({ key }) => key >= nowKey).map(({ slot }) => slot);
+function mergeSlot(base: ForecastSlot | undefined, update: ForecastSlot) {
+  if (!base) return update;
 
-  return upcoming.length ? upcoming : slots.map(({ slot }) => slot);
+  const updateIsWet = update.type !== "없음" || update.precipitation > 0;
+  const wetterAmount =
+    update.precipitation >= base.precipitation ? update.amount : base.amount;
+
+  return {
+    time: base.time,
+    pop: Math.max(base.pop, update.pop),
+    type: updateIsWet ? update.type : base.type,
+    temp: update.temp,
+    amount: wetterAmount,
+    sky: update.sky === "실황" ? base.sky : update.sky,
+    code: update.code || base.code,
+    precipitation: Math.max(base.precipitation, update.precipitation),
+    humidity: update.humidity || base.humidity,
+    wind: update.wind || base.wind,
+    windDirection: update.windDirection || base.windDirection,
+  } satisfies ForecastSlot;
+}
+
+function composeKmaSlots(
+  villageItems: KmaItem[],
+  ultraForecastItems: KmaItem[] = [],
+  ultraNowcastItems: KmaItem[] = [],
+) {
+  const nowKey = currentForecastKey();
+  const villageSlots = buildSlots(villageItems, "forecast");
+  const ultraSlots = buildSlots(ultraForecastItems, "forecast");
+  const nowcastSlot = buildSlots(ultraNowcastItems, "nowcast").at(-1);
+  const merged = new Map<string, ForecastSlot>();
+
+  villageSlots.forEach(({ key, slot }) => merged.set(key, slot));
+  ultraSlots.forEach(({ key, slot }) => {
+    merged.set(key, mergeSlot(merged.get(key), slot));
+  });
+
+  const upcoming = [...merged.entries()]
+    .filter(([key]) => key >= nowKey)
+    .sort(([left], [right]) => left.localeCompare(right))
+    .map(([, slot]) => slot);
+
+  if (nowcastSlot) {
+    const sameTimeIndex = upcoming.findIndex(
+      (slot) => slot.time === nowcastSlot.slot.time,
+    );
+
+    if (sameTimeIndex >= 0) {
+      upcoming[sameTimeIndex] = mergeSlot(upcoming[sameTimeIndex], nowcastSlot.slot);
+    } else {
+      upcoming.unshift(nowcastSlot.slot);
+    }
+  }
+
+  return upcoming.length ? upcoming : villageSlots.map(({ slot }) => slot);
 }
 
 function pickDecisionForecast(hourly: ForecastSlot[]) {
@@ -288,14 +487,31 @@ function pickDecisionForecast(hourly: ForecastSlot[]) {
   return target.length >= 3 ? target.slice(0, 5) : hourly.slice(0, 5);
 }
 
+async function optionalKmaItems(fetcher: () => Promise<KmaItem[]>) {
+  try {
+    return await fetcher();
+  } catch {
+    return [];
+  }
+}
+
 async function fetchKmaSpot(
   location: SavedLocation,
   sample: (typeof MAP_SAMPLES)[number],
 ): Promise<PrecipitationSpot> {
   const latitude = location.latitude + sample.lat;
   const longitude = location.longitude + sample.lon;
-  const items = await fetchVillageItems(latitude, longitude);
-  const [slot] = nextSlots(items);
+  const [ultraForecastItems, ultraNowcastItems] = await Promise.all([
+    optionalKmaItems(() => fetchUltraForecastItems(latitude, longitude)),
+    optionalKmaItems(() => fetchUltraNowcastItems(latitude, longitude)),
+  ]);
+  let slots = composeKmaSlots([], ultraForecastItems, ultraNowcastItems);
+
+  if (!slots.length) {
+    slots = composeKmaSlots(await fetchVillageItems(latitude, longitude));
+  }
+
+  const [slot] = slots;
 
   return {
     id: sample.id,
@@ -320,7 +536,7 @@ async function fetchKmaPrecipitationMap(
   );
 
   return {
-    source: "기상청 주변 격자 예보",
+    source: "기상청 초단기 주변 격자",
     maxPop: Math.max(...spots.map((spot) => spot.pop)),
     maxPrecipitation: Math.max(...spots.map((spot) => spot.precipitation)),
     spots,
@@ -330,9 +546,22 @@ async function fetchKmaPrecipitationMap(
 export async function fetchKmaWeather(
   location: SavedLocation,
 ): Promise<KmaForecastBundle> {
-  const items = await fetchVillageItems(location.latitude, location.longitude);
-  const hourly = nextSlots(items).slice(0, 14);
-  if (!hourly.length) throw new Error("기상청 시간별 예보 데이터가 비어 있습니다.");
+  const villageItems = await fetchVillageItems(location.latitude, location.longitude);
+  const [ultraForecastItems, ultraNowcastItems] = await Promise.all([
+    optionalKmaItems(() =>
+      fetchUltraForecastItems(location.latitude, location.longitude),
+    ),
+    optionalKmaItems(() =>
+      fetchUltraNowcastItems(location.latitude, location.longitude),
+    ),
+  ]);
+  const hourly = composeKmaSlots(
+    villageItems,
+    ultraForecastItems,
+    ultraNowcastItems,
+  ).slice(0, 14);
+
+  if (!hourly.length) throw new Error("기상청 예보 데이터가 비어 있습니다.");
 
   const forecast = pickDecisionForecast(hourly);
   const temps = hourly.map((slot) => slot.temp);
