@@ -21,7 +21,7 @@ function requestUpdateToken(request: Request) {
 }
 
 export async function GET(request: Request) {
-  return Response.json(getLocation(request));
+  return Response.json(await getLocation(request));
 }
 
 export async function POST(request: Request) {
@@ -63,10 +63,10 @@ export async function POST(request: Request) {
   const resolvedAddress = await reverseGeocode(location.latitude, location.longitude);
   const resolvedLocation = withResolvedAddress(location, resolvedAddress);
 
-  saveLocation(resolvedLocation);
+  const storage = await saveLocation(resolvedLocation);
 
   return Response.json(
-    { location: resolvedLocation },
+    { location: resolvedLocation, storage },
     {
       headers: {
         "Set-Cookie": locationCookieHeader(request, resolvedLocation),

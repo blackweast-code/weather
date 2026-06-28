@@ -5,7 +5,7 @@ export const dynamic = "force-dynamic";
 
 export async function GET(request: Request) {
   try {
-    const { location } = getLocation(request);
+    const { location } = await getLocation(request);
     const weather = await fetchWeather(location);
 
     return Response.json(weather);

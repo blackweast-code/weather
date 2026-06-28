@@ -2,6 +2,7 @@ import { DEFAULT_LOCATION, type SavedLocation } from "@/lib/weather";
 
 const LOCATION_COOKIE = "umbrella_location";
 const ONE_YEAR_SECONDS = 60 * 60 * 24 * 365;
+const PERSISTENT_LOCATION_KEY = "umbrella_agent:last_location";
 
 type GlobalLocation = typeof globalThis & {
   __umbrellaLocation?: SavedLocation;
@@ -10,11 +11,68 @@ type GlobalLocation = typeof globalThis & {
 type LocationLookup = {
   location: SavedLocation;
   persisted: boolean;
+  storage?: "query" | "persistent" | "memory" | "cookie" | "env" | "default";
   warning?: string;
+};
+
+type StorageSaveResult = {
+  persisted: boolean;
+  storage: "persistent" | "memory";
+  warning?: string;
+};
+
+type RedisRestResponse<T> = {
+  result?: T;
+  error?: string;
 };
 
 function globalLocation() {
   return globalThis as GlobalLocation;
+}
+
+function persistentStorageConfig() {
+  const url = (
+    process.env.KV_REST_API_URL ??
+    process.env.UPSTASH_REDIS_REST_URL ??
+    process.env.REDIS_REST_API_URL ??
+    ""
+  ).trim();
+  const token = (
+    process.env.KV_REST_API_TOKEN ??
+    process.env.UPSTASH_REDIS_REST_TOKEN ??
+    process.env.REDIS_REST_API_TOKEN ??
+    ""
+  ).trim();
+
+  if (!url || !token) return null;
+
+  return { url, token };
+}
+
+async function runStorageCommand<T>(
+  command: Array<string | number>,
+): Promise<T | null> {
+  const config = persistentStorageConfig();
+  if (!config) return null;
+
+  const response = await fetch(config.url, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${config.token}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(command),
+    cache: "no-store",
+  });
+
+  if (!response.ok) {
+    throw new Error("위치 영구 저장소에 연결하지 못했습니다.");
+  }
+
+  const data = (await response.json()) as RedisRestResponse<T>;
+  if (data.error) throw new Error(data.error);
+
+  return data.result ?? null;
 }
 
 export function expectedUpdateToken() {
@@ -46,7 +104,10 @@ export function normalizeLocation(
   const normalizedLongitude = longitude as number;
 
   return {
-    label: typeof label === "string" && label.trim() ? label.trim() : "내 휴대폰 위치",
+    label:
+      typeof label === "string" && label.trim()
+        ? label.trim()
+        : "내 휴대폰 위치",
     latitude: normalizedLatitude,
     longitude: normalizedLongitude,
     updatedAt,
@@ -59,6 +120,7 @@ export function withResolvedAddress(
   address: { label: string; address: string; locality: string; source: string } | null,
 ) {
   if (!address) return location;
+
   const isGenericLabel =
     location.label === "내 휴대폰 위치" || location.label === DEFAULT_LOCATION.label;
 
@@ -135,29 +197,96 @@ function locationFromEnv() {
   return normalizeLocation(label, latitude, longitude);
 }
 
-export function getLocation(request: Request): LocationLookup {
-  const queryLocation = locationFromQuery(request);
-  if (queryLocation) return { location: queryLocation, persisted: true };
+async function locationFromPersistentStorage() {
+  try {
+    const raw = await runStorageCommand<string>(["GET", PERSISTENT_LOCATION_KEY]);
+    if (!raw || typeof raw !== "string") return null;
 
-  const cookieLocation = locationFromCookie(request);
-  if (cookieLocation) return { location: cookieLocation, persisted: true };
+    const parsed = JSON.parse(raw) as Partial<SavedLocation>;
+    const location = normalizeLocation(
+      parsed.label,
+      parsed.latitude,
+      parsed.longitude,
+      parsed.updatedAt,
+    );
+    if (!location) return null;
+
+    return {
+      ...location,
+      address: parsed.address,
+      addressSource: parsed.addressSource,
+      locality: parsed.locality,
+    };
+  } catch {
+    return null;
+  }
+}
+
+async function saveLocationToPersistentStorage(location: SavedLocation) {
+  if (!persistentStorageConfig()) return false;
+
+  await runStorageCommand<string>([
+    "SET",
+    PERSISTENT_LOCATION_KEY,
+    JSON.stringify(location),
+  ]);
+
+  return true;
+}
+
+export async function getLocation(request: Request): Promise<LocationLookup> {
+  const queryLocation = locationFromQuery(request);
+  if (queryLocation) {
+    return { location: queryLocation, persisted: true, storage: "query" };
+  }
+
+  const persistentLocation = await locationFromPersistentStorage();
+  if (persistentLocation) {
+    globalLocation().__umbrellaLocation = persistentLocation;
+
+    return {
+      location: persistentLocation,
+      persisted: true,
+      storage: "persistent",
+    };
+  }
 
   const memoryLocation = globalLocation().__umbrellaLocation;
-  if (memoryLocation) return { location: memoryLocation, persisted: true };
+  if (memoryLocation) {
+    return { location: memoryLocation, persisted: true, storage: "memory" };
+  }
+
+  const cookieLocation = locationFromCookie(request);
+  if (cookieLocation) {
+    return { location: cookieLocation, persisted: true, storage: "cookie" };
+  }
 
   const envLocation = locationFromEnv();
-  if (envLocation) return { location: envLocation, persisted: true };
+  if (envLocation) return { location: envLocation, persisted: true, storage: "env" };
 
   return {
     location: DEFAULT_LOCATION,
     persisted: false,
+    storage: "default",
     warning:
-      "Vercel에서는 별도 데이터베이스가 없으면 위치를 브라우저 쿠키와 서버 메모리에 저장합니다.",
+      "영구 저장소 환경변수가 없으면 위치를 브라우저 쿠키와 서버 메모리에만 저장합니다.",
   };
 }
 
-export function saveLocation(location: SavedLocation) {
+export async function saveLocation(
+  location: SavedLocation,
+): Promise<StorageSaveResult> {
   globalLocation().__umbrellaLocation = location;
+
+  const persisted = await saveLocationToPersistentStorage(location);
+  if (persisted) return { persisted: true, storage: "persistent" };
+
+  return {
+    persisted: false,
+    storage: "memory",
+    warning:
+      "KV_REST_API_URL/KV_REST_API_TOKEN 또는 UPSTASH_REDIS_REST_URL/UPSTASH_REDIS_REST_TOKEN이 없어 서버 메모리에만 저장했습니다.",
+  };
 }
 
 export function locationCookieHeader(request: Request, location: SavedLocation) {
