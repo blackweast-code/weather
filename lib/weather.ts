@@ -142,6 +142,66 @@ function withTopicParticle(value: string) {
   return `${value}${hasFinalConsonant(value) ? "은" : "는"}`;
 }
 
+function timeToHour(time: string) {
+  const hour = Number(time.slice(0, 2));
+
+  return Number.isFinite(hour) ? hour : null;
+}
+
+function formatKoreanHour(time: string) {
+  const hour = timeToHour(time);
+  const minute = Number(time.slice(3, 5));
+  if (hour === null) return time;
+
+  const period = hour < 12 ? "오전" : "오후";
+  const displayHour = hour % 12 === 0 ? 12 : hour % 12;
+  const minuteText = Number.isFinite(minute) && minute > 0 ? ` ${minute}분` : "";
+
+  return `${period} ${displayHour}시${minuteText}`;
+}
+
+function isWetSlot(slot: ForecastSlot) {
+  return (
+    ["비", "비/눈", "눈", "소나기", "빗방울", "빗방울/눈", "눈날림"].includes(
+      slot.type,
+    ) ||
+    slot.precipitation > 0 ||
+    !slot.amount.startsWith("0")
+  );
+}
+
+function rainDetail(slot: ForecastSlot) {
+  const amount = slot.precipitation > 0 ? `, 예상 ${slot.amount}` : "";
+  const type = slot.type !== "없음" ? `${slot.type} ` : "";
+
+  return `${type}강수확률 ${slot.pop}%${amount}`;
+}
+
+function describeAfternoonRain(slots: ForecastSlot[]) {
+  const afternoonSlots = slots.filter((slot) => {
+    const hour = timeToHour(slot.time);
+
+    return hour !== null && hour >= 12 && hour <= 23;
+  });
+
+  if (!afternoonSlots.length) {
+    return "오후 강수 예상: 확인 가능한 오후 예보 없음";
+  }
+
+  const riskSlots = afternoonSlots.filter((slot) => isWetSlot(slot) || slot.pop >= 40);
+  const maxPop = Math.max(...afternoonSlots.map((slot) => slot.pop));
+
+  if (!riskSlots.length) {
+    return `오후 강수 예상: 없음(오후 최대 ${maxPop}%)`;
+  }
+
+  const firstRisk = riskSlots[0];
+
+  return `오후 강수 예상: ${formatKoreanHour(firstRisk.time)}쯤(${rainDetail(
+    firstRisk,
+  )})`;
+}
+
 function findNearestIndex(times: string[], targetHour: number) {
   let bestIndex = 0;
   let bestDistance = Number.POSITIVE_INFINITY;
@@ -195,11 +255,14 @@ function findCurrentOrNextIndex(times: string[]) {
   return nextIndex === -1 ? 0 : nextIndex;
 }
 
-function decideUmbrella(location: SavedLocation, forecast: ForecastSlot[]) {
+function decideUmbrella(
+  location: SavedLocation,
+  forecast: ForecastSlot[],
+  hourly: ForecastSlot[] = forecast,
+) {
   const maxPop = Math.max(...forecast.map((slot) => slot.pop));
-  const wetSlots = forecast.filter((slot) =>
-    ["비", "눈", "소나기"].includes(slot.type),
-  );
+  const afternoonRain = describeAfternoonRain(hourly);
+  const wetSlots = forecast.filter((slot) => isWetSlot(slot));
   const strongPopSlots = forecast.filter((slot) => slot.pop >= 60);
   const midPopSlots = forecast.filter((slot) => slot.pop >= 40 && slot.pop < 60);
   const commuteRisk = forecast.some((slot) => {
@@ -222,8 +285,9 @@ function decideUmbrella(location: SavedLocation, forecast: ForecastSlot[]) {
         `최대 강수확률 ${maxPop}%`,
         `강수형태 ${firstWet.type}`,
         `예상 강수량 ${firstWet.amount}`,
+        afternoonRain,
       ],
-      message: `[오늘의 우산 알림]\n지역: ${location.label}\n판단: 우산 필요\n${firstWet.time} 전후 비 가능성. 최고 ${Math.max(...forecast.map((slot) => slot.temp))}°C / 최저 ${Math.min(...forecast.map((slot) => slot.temp))}°C / 강수확률 최대 ${maxPop}%`,
+      message: `[오늘의 우산 알림]\n지역: ${location.label}\n판단: 우산 필요\n${afternoonRain}\n최고 ${Math.max(...forecast.map((slot) => slot.temp))}°C / 최저 ${Math.min(...forecast.map((slot) => slot.temp))}°C / 강수확률 최대 ${maxPop}%`,
     };
   }
 
@@ -240,8 +304,9 @@ function decideUmbrella(location: SavedLocation, forecast: ForecastSlot[]) {
         `최대 강수확률 ${maxPop}%`,
         `40~59% 시간대 ${midPopSlots.length}개`,
         commuteRisk ? "출퇴근 시간대 강수 가능성 있음" : "불확실성 기준 적용",
+        afternoonRain,
       ],
-      message: `[오늘의 우산 알림]\n지역: ${location.label}\n판단: 우산 권장\n강수확률이 애매합니다. 휴대용 우산을 챙기면 좋아요. 최대 ${maxPop}%`,
+      message: `[오늘의 우산 알림]\n지역: ${location.label}\n판단: 우산 권장\n${afternoonRain}\n휴대용 우산을 챙기면 좋아요. 최대 ${maxPop}%`,
     };
   }
 
@@ -257,15 +322,16 @@ function decideUmbrella(location: SavedLocation, forecast: ForecastSlot[]) {
       `최대 강수확률 ${maxPop}%`,
       "강수형태 없음",
       "예상 강수량 0mm",
+      afternoonRain,
     ],
-    message: `[오늘의 우산 알림]\n지역: ${location.label}\n판단: 우산 불필요\n오늘은 강수 가능성이 낮습니다. 최고 ${Math.max(...forecast.map((slot) => slot.temp))}°C / 최저 ${Math.min(...forecast.map((slot) => slot.temp))}°C`,
+    message: `[오늘의 우산 알림]\n지역: ${location.label}\n판단: 우산 불필요\n${afternoonRain}\n최고 ${Math.max(...forecast.map((slot) => slot.temp))}°C / 최저 ${Math.min(...forecast.map((slot) => slot.temp))}°C`,
   };
 }
 
 export async function fetchWeather(location: SavedLocation): Promise<WeatherResult> {
   if (isKmaConfigured()) {
     const weather = await fetchKmaWeather(location);
-    const decision = decideUmbrella(location, weather.forecast);
+    const decision = decideUmbrella(location, weather.forecast, weather.hourly);
 
     return {
       location,
@@ -329,7 +395,7 @@ async function fetchOpenMeteoWeather(
     ),
   );
   const temps = hourly.temperature_2m ?? [];
-  const decision = decideUmbrella(location, forecast);
+  const decision = decideUmbrella(location, forecast, hourlyTimeline);
   const precipitationMap = await fetchPrecipitationMap(location, startIndex);
 
   return {
