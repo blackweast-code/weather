@@ -1,5 +1,7 @@
 # PlayMCP 위치 기반 카카오톡 알림 설정
 
+> 참고: 이 문서는 Codex/ChatGPT가 켜져 있을 때 동작하는 PlayMCP 방식입니다. PC나 Codex 앱이 꺼져 있어도 매일 오전 8시에 자동 발송하려면 `docs/SERVER_CRON_KAKAO_SETUP.md`의 Vercel Cron + 카카오 REST API 방식을 사용하세요.
+
 이 프로젝트는 카카오 공식 OAuth 토큰을 직접 관리하지 않고, ChatGPT에 연결된 PlayMCP 카카오톡 도구로 메시지를 보낸다.
 
 ## 핵심 구조

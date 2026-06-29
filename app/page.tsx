@@ -96,8 +96,8 @@ const workflowSteps = [
   },
   {
     time: "08:00",
-    title: "PlayMCP 발송",
-    detail: "ChatGPT 자동화가 카카오톡 전송",
+    title: "서버 자동 발송",
+    detail: "Vercel Cron이 카카오톡 전송",
   },
 ];
 
@@ -328,7 +328,7 @@ export default function Home() {
     return (
       <main className="app-shell">
         <section className="card loading-panel">
-          <p className="eyebrow">PlayMCP Weather Agent</p>
+          <p className="eyebrow">Server Weather Agent</p>
           <h1>위치 기반 날씨를 불러오는 중입니다</h1>
           <p>{error || "저장된 위치가 없으면 기본 위치 기준으로 먼저 표시합니다."}</p>
         </section>
@@ -340,7 +340,7 @@ export default function Home() {
     <main className="app-shell">
       <header className="topbar">
         <div>
-          <p className="eyebrow">PlayMCP Weather Agent</p>
+          <p className="eyebrow">Server Weather Agent</p>
           <h1>오늘 우산 필요할까?</h1>
         </div>
         <div className="topbar-meta">
@@ -426,11 +426,11 @@ export default function Home() {
             <strong>최대 {weather.precipitationMap.maxPop}%</strong>
           </div>
           <div className="message-preview">
-            <span>PlayMCP 카카오톡 알림</span>
-            <strong>ChatGPT 자동화 발송</strong>
+            <span>카카오톡 알림</span>
+            <strong>Vercel Cron 자동 발송</strong>
             <p>{weather.decision.message}</p>
             <div className="playmcp-status">
-              <span className="ready">PlayMCP 연결 확인됨</span>
+              <span className="ready">서버 발송 경로 준비됨</span>
               <span className={weather.location.source === "saved" ? "ready" : ""}>
                 {weather.location.source === "saved"
                   ? "자동 위치 저장됨"
@@ -605,11 +605,11 @@ export default function Home() {
         </article>
       </section>
 
-      <section className="workflow-band" aria-label="PlayMCP 자동화 흐름">
+      <section className="workflow-band" aria-label="카카오톡 자동화 흐름">
         <div className="section-heading">
           <div>
             <p className="section-kicker">자동화 흐름</p>
-            <h2>위치 기반 카카오톡 발송 순서</h2>
+            <h2>서버 기반 카카오톡 발송 순서</h2>
           </div>
           <span className="freshness">메시지 200자 이하</span>
         </div>
