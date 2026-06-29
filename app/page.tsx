@@ -115,9 +115,12 @@ const timelineModes: Array<{ key: TimelineMode; label: string }> = [
 ];
 
 function slotIconClass(slot: ForecastSlot) {
-  if (slot.type === "비" || slot.type === "소나기") return "rain";
-  if (slot.type === "눈") return "snow";
-  if (slot.sky === "구름" || slot.sky === "흐림") return "cloud";
+  if (["비", "비/눈", "소나기", "빗방울", "빗방울/눈"].includes(slot.type)) {
+    return "rain";
+  }
+  if (["눈", "눈날림"].includes(slot.type)) return "snow";
+  if (slot.sky === "흐림") return "overcast";
+  if (slot.sky === "구름많음" || slot.sky === "구름") return "cloudy";
   return "sun";
 }
 
@@ -567,7 +570,11 @@ export default function Home() {
               return (
                 <div className="hour-card weather-mode" key={`${slot.time}-${index}`}>
                   <strong>{slot.temp}°</strong>
-                  <div className={`weather-icon ${slotIconClass(slot)}`}>
+                  <div
+                    aria-label={timelineMetric(slot, timelineMode)}
+                    className={`weather-icon ${slotIconClass(slot)}`}
+                    title={timelineMetric(slot, timelineMode)}
+                  >
                     <span />
                   </div>
                   <time>{displayTime}</time>

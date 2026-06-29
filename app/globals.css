@@ -33,6 +33,7 @@ body {
     "Malgun Gothic",
     Arial,
     sans-serif;
+  overflow-x: hidden;
 }
 
 button,
@@ -654,10 +655,21 @@ h3 {
   margin-top: 16px;
 }
 
+.content-grid > *,
+.hero-grid > *,
+.location-band > * {
+  min-width: 0;
+}
+
 .forecast-card,
 .hourly-card,
 .reasons-card {
   padding: 22px;
+}
+
+.hourly-card {
+  min-width: 0;
+  overflow: hidden;
 }
 
 .section-heading {
@@ -698,10 +710,29 @@ h3 {
 .hourly-strip {
   display: grid;
   gap: 0;
-  grid-auto-columns: minmax(78px, 1fr);
+  grid-auto-columns: 78px;
   grid-auto-flow: column;
+  max-width: 100%;
   overflow-x: auto;
-  padding: 4px 2px 8px;
+  overscroll-behavior-x: contain;
+  padding: 4px 2px 12px;
+  scrollbar-color: #9b9b9b #edf1ec;
+  scrollbar-width: thin;
+  touch-action: pan-x;
+}
+
+.hourly-strip::-webkit-scrollbar {
+  height: 8px;
+}
+
+.hourly-strip::-webkit-scrollbar-track {
+  background: #edf1ec;
+  border-radius: 999px;
+}
+
+.hourly-strip::-webkit-scrollbar-thumb {
+  background: #9b9b9b;
+  border-radius: 999px;
 }
 
 .hour-card {
@@ -834,13 +865,17 @@ h3 {
 .weather-icon.sun span {
   background: #ffc21a;
   border-radius: 50%;
+  box-shadow:
+    0 0 0 4px rgba(255, 194, 26, 0.18),
+    0 0 0 8px rgba(255, 194, 26, 0.08);
   height: 24px;
   left: 9px;
   top: 6px;
   width: 24px;
 }
 
-.weather-icon.cloud span,
+.weather-icon.cloudy span,
+.weather-icon.overcast span,
 .weather-icon.rain span,
 .weather-icon.snow span {
   background: #7db5f5;
@@ -851,7 +886,8 @@ h3 {
   width: 28px;
 }
 
-.weather-icon.cloud span::before,
+.weather-icon.cloudy span::before,
+.weather-icon.overcast span::before,
 .weather-icon.rain span::before,
 .weather-icon.snow span::before {
   background: inherit;
@@ -862,6 +898,38 @@ h3 {
   position: absolute;
   top: -9px;
   width: 18px;
+}
+
+.weather-icon.cloudy span {
+  background: #86b9ee;
+  box-shadow: -10px -8px 0 -2px #ffc21a;
+}
+
+.weather-icon.cloudy span::after {
+  background: #c9def2;
+  border-radius: 50%;
+  content: "";
+  height: 14px;
+  left: 18px;
+  position: absolute;
+  top: -5px;
+  width: 14px;
+}
+
+.weather-icon.overcast span {
+  background: #98a6b6;
+  box-shadow: -8px 7px 0 -1px #c3ccd5;
+}
+
+.weather-icon.overcast span::after {
+  background: #6f7b89;
+  border-radius: 18px;
+  content: "";
+  height: 15px;
+  left: 13px;
+  position: absolute;
+  top: 5px;
+  width: 26px;
 }
 
 .weather-icon.rain span::after {
@@ -1080,5 +1148,11 @@ h3 {
     color: var(--muted);
     grid-column: 2 / -1;
     padding-left: 0;
+  }
+
+  .hourly-strip {
+    grid-auto-columns: 76px;
+    margin-inline: -2px;
+    padding-bottom: 14px;
   }
 }
