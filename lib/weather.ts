@@ -331,27 +331,31 @@ function decideUmbrella(
 
 export async function fetchWeather(location: SavedLocation): Promise<WeatherResult> {
   if (isKmaConfigured()) {
-    const weather = await fetchKmaWeather(location);
-    const decision = decideUmbrella(location, weather.forecast, weather.hourly);
+    try {
+      const weather = await fetchKmaWeather(location);
+      const decision = decideUmbrella(location, weather.forecast, weather.hourly);
 
-    return {
-      location,
-      baseTime: new Date().toLocaleString("ko-KR", { timeZone: "Asia/Seoul" }),
-      high: weather.high,
-      low: weather.low,
-      maxPop: weather.maxPop,
-      forecast: weather.forecast,
-      hourly: weather.hourly,
-      precipitationMap: weather.precipitationMap,
-      sourceInfo: {
-        weather: "기상청 초단기실황 + 초단기예보 + 단기예보",
-        address: location.addressSource ?? "OpenStreetMap Nominatim",
-        map: "OpenStreetMap + 기상청 초단기/단기 격자 예보",
-        koreaRecommendation:
-          "현재는 초단기실황, 3시간 이내는 초단기예보, 이후 시간대는 단기예보를 우선하고 약한 오후 소나기 시작 시점은 보정합니다.",
-      },
-      decision,
-    };
+      return {
+        location,
+        baseTime: new Date().toLocaleString("ko-KR", { timeZone: "Asia/Seoul" }),
+        high: weather.high,
+        low: weather.low,
+        maxPop: weather.maxPop,
+        forecast: weather.forecast,
+        hourly: weather.hourly,
+        precipitationMap: weather.precipitationMap,
+        sourceInfo: {
+          weather: "기상청 초단기실황 + 초단기예보 + 단기예보",
+          address: location.addressSource ?? "OpenStreetMap Nominatim",
+          map: "OpenStreetMap + 기상청 초단기/단기 격자 예보",
+          koreaRecommendation:
+            "현재는 초단기실황, 3시간 이내는 초단기예보, 이후 시간대는 단기예보를 우선하고 약한 오후 소나기 시작 시점은 보정합니다.",
+        },
+        decision,
+      };
+    } catch (error) {
+      return fetchOpenMeteoWeather(location, error);
+    }
   }
 
   return fetchOpenMeteoWeather(location);

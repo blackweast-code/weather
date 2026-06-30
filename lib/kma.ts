@@ -637,6 +637,33 @@ async function fetchKmaPrecipitationMap(
   };
 }
 
+function fallbackKmaPrecipitationMap(
+  location: SavedLocation,
+  hourly: ForecastSlot[],
+): PrecipitationMap {
+  const slot = hourly[0];
+  const spots = MAP_SAMPLES.map((sample) => ({
+    id: sample.id,
+    label: sample.label,
+    latitude: location.latitude + sample.lat,
+    longitude: location.longitude + sample.lon,
+    x: sample.x,
+    y: sample.y,
+    pop: slot?.pop ?? 0,
+    temp: slot?.temp ?? 0,
+    precipitation: slot?.precipitation ?? 0,
+    sky: slot?.sky ?? "확인 중",
+    type: slot?.type ?? "없음",
+  }));
+
+  return {
+    source: "기상청 현재 격자 기준",
+    maxPop: Math.max(...spots.map((spot) => spot.pop)),
+    maxPrecipitation: Math.max(...spots.map((spot) => spot.precipitation)),
+    spots,
+  };
+}
+
 export async function fetchKmaWeather(
   location: SavedLocation,
 ): Promise<KmaForecastBundle> {
@@ -659,7 +686,9 @@ export async function fetchKmaWeather(
 
   const forecast = pickDecisionForecast(hourly);
   const temps = hourly.map((slot) => slot.temp);
-  const precipitationMap = await fetchKmaPrecipitationMap(location);
+  const precipitationMap = await fetchKmaPrecipitationMap(location).catch(() =>
+    fallbackKmaPrecipitationMap(location, hourly),
+  );
 
   return {
     forecast,
