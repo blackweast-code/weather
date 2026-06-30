@@ -220,6 +220,7 @@ export default function Home() {
     accuracy: number,
     locationLabel: string,
     updateToken: string,
+    updateMode: "auto" | "manual",
   ): Promise<WeatherData["location"]> {
     const response = await fetch("/api/location", {
       method: "POST",
@@ -232,6 +233,7 @@ export default function Home() {
         label: locationLabel,
         latitude,
         longitude,
+        updateMode,
       }),
     });
     const payload = await response.json();
@@ -284,6 +286,7 @@ export default function Home() {
             position.coords.accuracy,
             locationLabel,
             updateToken,
+            mode,
           );
           window.localStorage.setItem("locationUpdateToken", updateToken);
           await loadWeather();
