@@ -60,6 +60,7 @@ const VILLAGE_BASE_TIMES = [
   "2000",
   "2300",
 ];
+const ULTRA_FORECAST_TRUST_HOURS = 3;
 
 const MAP_SAMPLES = [
   { id: "nw", label: "북서 약 8km", lat: 0.055, lon: -0.07, x: 22, y: 24 },
@@ -422,6 +423,37 @@ function currentForecastKey() {
   return `${date}${String(hour).padStart(2, "0")}00`;
 }
 
+function keyToKstDate(key: string) {
+  return new Date(
+    `${key.slice(0, 4)}-${key.slice(4, 6)}-${key.slice(6, 8)}T${key.slice(
+      8,
+      10,
+    )}:${key.slice(10, 12)}:00+09:00`,
+  );
+}
+
+function isNearTermUltraKey(key: string) {
+  const diffMs = keyToKstDate(key).getTime() - kstNowDate().getTime();
+  const trustMs = ULTRA_FORECAST_TRUST_HOURS * 60 * 60 * 1000;
+
+  return diffMs >= -60 * 60 * 1000 && diffMs <= trustMs;
+}
+
+function hasPrecipitationRisk(slot: ForecastSlot) {
+  return slot.type !== "없음" || slot.precipitation > 0 || slot.pop >= 40;
+}
+
+function shouldApplyUltraSlot(
+  key: string,
+  base: ForecastSlot | undefined,
+  update: ForecastSlot,
+) {
+  if (isNearTermUltraKey(key)) return true;
+  if (!base) return false;
+
+  return hasPrecipitationRisk(base) && hasPrecipitationRisk(update);
+}
+
 function mergeSlot(base: ForecastSlot | undefined, update: ForecastSlot) {
   if (!base) return update;
 
@@ -457,7 +489,10 @@ function composeKmaSlots(
 
   villageSlots.forEach(({ key, slot }) => merged.set(key, slot));
   ultraSlots.forEach(({ key, slot }) => {
-    merged.set(key, mergeSlot(merged.get(key), slot));
+    const base = merged.get(key);
+    if (shouldApplyUltraSlot(key, base, slot)) {
+      merged.set(key, mergeSlot(base, slot));
+    }
   });
 
   const upcoming = [...merged.entries()]
