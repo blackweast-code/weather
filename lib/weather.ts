@@ -348,7 +348,7 @@ export async function fetchWeather(location: SavedLocation): Promise<WeatherResu
         address: location.addressSource ?? "OpenStreetMap Nominatim",
         map: "OpenStreetMap + 기상청 초단기/단기 격자 예보",
         koreaRecommendation:
-          "현재는 초단기실황, 3시간 이내는 초단기예보, 이후 시간대는 단기예보를 우선해 한국 격자 기준으로 계산합니다.",
+          "현재는 초단기실황, 3시간 이내는 초단기예보, 이후 시간대는 단기예보를 우선하고 약한 오후 소나기 시작 시점은 보정합니다.",
       },
       decision,
     };

@@ -61,6 +61,7 @@ const VILLAGE_BASE_TIMES = [
   "2300",
 ];
 const ULTRA_FORECAST_TRUST_HOURS = 3;
+const EVENING_SHOWER_CONFIRM_HOUR = 17;
 
 const MAP_SAMPLES = [
   { id: "nw", label: "북서 약 8km", lat: 0.055, lon: -0.07, x: 22, y: 24 },
@@ -454,6 +455,62 @@ function shouldApplyUltraSlot(
   return hasPrecipitationRisk(base) && hasPrecipitationRisk(update);
 }
 
+function slotHour(slot: ForecastSlot) {
+  const hour = Number(slot.time.slice(0, 2));
+
+  return Number.isFinite(hour) ? hour : -1;
+}
+
+function isShowerSlot(slot: ForecastSlot) {
+  return slot.type === "소나기";
+}
+
+function normalizeEarlyShowerSlot(slot: ForecastSlot): ForecastSlot {
+  return {
+    ...slot,
+    amount: "0mm",
+    code: 3,
+    pop: Math.min(slot.pop, 30),
+    precipitation: 0,
+    sky: slot.sky === "소나기" ? "구름많음" : slot.sky,
+    type: "없음",
+  };
+}
+
+function stabilizeAfternoonShowers(slots: ForecastSlot[]) {
+  const hasEarlyLightShower = slots.some((slot) => {
+    const hour = slotHour(slot);
+
+    return (
+      hour >= 12 &&
+      hour < EVENING_SHOWER_CONFIRM_HOUR &&
+      isShowerSlot(slot) &&
+      slot.precipitation < 3
+    );
+  });
+  const hasEveningShower = slots.some((slot) => {
+    const hour = slotHour(slot);
+
+    return hour >= EVENING_SHOWER_CONFIRM_HOUR && hour <= 21 && isShowerSlot(slot);
+  });
+
+  if (!hasEarlyLightShower || !hasEveningShower) return slots;
+
+  return slots.map((slot) => {
+    const hour = slotHour(slot);
+    if (
+      hour >= 12 &&
+      hour < EVENING_SHOWER_CONFIRM_HOUR &&
+      isShowerSlot(slot) &&
+      slot.precipitation < 3
+    ) {
+      return normalizeEarlyShowerSlot(slot);
+    }
+
+    return slot;
+  });
+}
+
 function mergeSlot(base: ForecastSlot | undefined, update: ForecastSlot) {
   if (!base) return update;
 
@@ -512,7 +569,9 @@ function composeKmaSlots(
     }
   }
 
-  return upcoming.length ? upcoming : villageSlots.map(({ slot }) => slot);
+  const composed = upcoming.length ? upcoming : villageSlots.map(({ slot }) => slot);
+
+  return stabilizeAfternoonShowers(composed);
 }
 
 function pickDecisionForecast(hourly: ForecastSlot[]) {
