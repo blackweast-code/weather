@@ -96,18 +96,24 @@ export function normalizeLocation(
   label: unknown,
   latitude: unknown,
   longitude: unknown,
+  accuracy?: unknown,
   updatedAt = "",
 ): SavedLocation | null {
   if (!isValidCoordinate(latitude, longitude)) return null;
 
   const normalizedLatitude = latitude as number;
   const normalizedLongitude = longitude as number;
+  const normalizedAccuracy =
+    typeof accuracy === "number" && Number.isFinite(accuracy) && accuracy > 0
+      ? Math.round(accuracy)
+      : undefined;
 
   return {
     label:
       typeof label === "string" && label.trim()
         ? label.trim()
         : "내 휴대폰 위치",
+    accuracy: normalizedAccuracy,
     latitude: normalizedLatitude,
     longitude: normalizedLongitude,
     updatedAt,
@@ -123,10 +129,13 @@ export function withResolvedAddress(
 
   const isGenericLabel =
     location.label === "내 휴대폰 위치" || location.label === DEFAULT_LOCATION.label;
+  const looksLikeAddressLabel = /(?:시|군|구|읍|면|동|로|길)(?:\s|$|\d)/.test(
+    location.label,
+  );
 
   return {
     ...location,
-    label: isGenericLabel ? address.label : location.label,
+    label: isGenericLabel || looksLikeAddressLabel ? address.label : location.label,
     address: address.address,
     addressSource: address.source,
     locality: address.locality,
@@ -163,6 +172,7 @@ function locationFromCookie(request: Request) {
       parsed.label,
       parsed.latitude,
       parsed.longitude,
+      parsed.accuracy,
       parsed.updatedAt,
     );
     if (!location) return null;
@@ -207,6 +217,7 @@ async function locationFromPersistentStorage() {
       parsed.label,
       parsed.latitude,
       parsed.longitude,
+      parsed.accuracy,
       parsed.updatedAt,
     );
     if (!location) return null;

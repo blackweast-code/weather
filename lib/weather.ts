@@ -5,6 +5,7 @@ export type SavedLocation = {
   address?: string;
   addressSource?: string;
   locality?: string;
+  accuracy?: number;
   latitude: number;
   longitude: number;
   updatedAt: string;

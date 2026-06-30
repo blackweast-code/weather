@@ -33,6 +33,7 @@ type PrecipitationSpot = {
 
 type WeatherData = {
   location: {
+    accuracy?: number;
     label: string;
     address?: string;
     locality?: string;
@@ -173,6 +174,19 @@ function openStreetMapUrl(location: WeatherData["location"]) {
   return `https://www.openstreetmap.org/export/embed.html?bbox=${bbox}&layer=mapnik`;
 }
 
+function isMobileBrowser() {
+  if (typeof window === "undefined" || typeof navigator === "undefined") {
+    return false;
+  }
+
+  const coarsePointer = window.matchMedia("(pointer: coarse)").matches;
+  const mobileUserAgent = /Android|iPhone|iPad|iPod|Mobile/i.test(
+    navigator.userAgent,
+  );
+
+  return coarsePointer || mobileUserAgent;
+}
+
 export default function Home() {
   const [weather, setWeather] = useState<WeatherData | null>(null);
   const [error, setError] = useState("");
@@ -203,6 +217,7 @@ export default function Home() {
   async function saveCoordinates(
     latitude: number,
     longitude: number,
+    accuracy: number,
     locationLabel: string,
     updateToken: string,
   ): Promise<WeatherData["location"]> {
@@ -213,6 +228,7 @@ export default function Home() {
         "x-location-update-token": updateToken,
       },
       body: JSON.stringify({
+        accuracy,
         label: locationLabel,
         latitude,
         longitude,
@@ -265,6 +281,7 @@ export default function Home() {
           const savedLocation = await saveCoordinates(
             position.coords.latitude,
             position.coords.longitude,
+            position.coords.accuracy,
             locationLabel,
             updateToken,
           );
@@ -294,7 +311,7 @@ export default function Home() {
             "위치 권한이 허용되지 않아 기본 위치를 사용합니다. 브라우저에서 위치 권한을 허용하면 자동 갱신됩니다.",
         });
       },
-      { enableHighAccuracy: false, maximumAge: 300000, timeout: 15000 },
+      { enableHighAccuracy: true, maximumAge: 60000, timeout: 20000 },
     );
   }
 
@@ -311,9 +328,15 @@ export default function Home() {
         );
       })
       .finally(() => {
-        if (storedToken && !autoRequested.current) {
+        if (storedToken && isMobileBrowser() && !autoRequested.current) {
           autoRequested.current = true;
           collectPhoneLocation("auto", storedToken);
+        } else if (storedToken) {
+          setSaveState({
+            status: "idle",
+            message:
+              "관리자 토큰은 저장되어 있지만 PC에서는 자동 위치 저장을 실행하지 않습니다. 휴대폰에서 열면 GPS 위치가 자동 저장됩니다.",
+          });
         } else if (!storedToken) {
           setSaveState({
             status: "idle",
@@ -459,6 +482,9 @@ export default function Home() {
             <small>
               {weather.location.latitude.toFixed(5)},{" "}
               {weather.location.longitude.toFixed(5)}
+              {typeof weather.location.accuracy === "number"
+                ? ` · 오차 약 ${weather.location.accuracy}m`
+                : ""}
             </small>
           </div>
         </div>

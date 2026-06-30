@@ -11,10 +11,13 @@ import { reverseGeocode } from "@/lib/geocode";
 export const dynamic = "force-dynamic";
 
 type LocationPayload = {
+  accuracy?: number;
   label?: string;
   latitude?: number;
   longitude?: number;
 };
+
+const MAX_LOCATION_ACCURACY_METERS = 1500;
 
 function requestUpdateToken(request: Request) {
   return request.headers.get("x-location-update-token")?.trim() ?? "";
@@ -50,12 +53,25 @@ export async function POST(request: Request) {
     payload.label,
     payload.latitude,
     payload.longitude,
+    payload.accuracy,
     new Date().toISOString(),
   );
 
   if (!location) {
     return Response.json(
       { error: "유효한 위도와 경도가 필요합니다." },
+      { status: 400 },
+    );
+  }
+
+  if (
+    typeof location.accuracy === "number" &&
+    location.accuracy > MAX_LOCATION_ACCURACY_METERS
+  ) {
+    return Response.json(
+      {
+        error: `위치 정확도가 낮아 저장하지 않았습니다. 현재 오차 약 ${location.accuracy}m입니다. 휴대폰 GPS를 켠 뒤 다시 시도하세요.`,
+      },
       { status: 400 },
     );
   }
