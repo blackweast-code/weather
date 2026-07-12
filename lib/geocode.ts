@@ -181,6 +181,32 @@ async function reverseGeocodeWithKakao(
   }
 }
 
+export async function reverseGeocodeDistrict(
+  latitude: number,
+  longitude: number,
+) {
+  try {
+    const regionData = await kakaoLocalFetch<KakaoRegionResponse>(
+      "coord2regioncode",
+      latitude,
+      longitude,
+    );
+    const regionDocuments = regionData?.documents ?? [];
+    const region =
+      regionDocuments.find((document) => document.region_type === "B") ??
+      regionDocuments.find((document) => document.region_type === "H") ??
+      regionDocuments[0];
+
+    return firstValue(
+      region?.region_2depth_name,
+      region?.region_1depth_name,
+      region?.region_3depth_name,
+    ) ?? null;
+  } catch {
+    return null;
+  }
+}
+
 export async function reverseGeocode(
   latitude: number,
   longitude: number,

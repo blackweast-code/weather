@@ -1,4 +1,5 @@
 import { fetchKmaWeather, isKmaConfigured } from "@/lib/kma";
+import { reverseGeocodeDistrict } from "@/lib/geocode";
 
 export type SavedLocation = {
   label: string;
@@ -439,9 +440,31 @@ const MAP_SAMPLES = [
   { id: "se", label: "남동 약 8km", lat: -0.055, lon: 0.07, x: 78, y: 76 },
 ];
 
+function dedupeRegionSpots(spots: PrecipitationSpot[]) {
+  const center = spots.find((spot) => spot.id === "c");
+  const regions = new Map<string, PrecipitationSpot>();
+
+  spots
+    .filter((spot) => spot.id !== "c" && spot.label !== center?.label)
+    .forEach((spot) => {
+      const current = regions.get(spot.label);
+      const currentSeverity = current
+        ? current.precipitation * 100 + current.pop
+        : -1;
+      const nextSeverity = spot.precipitation * 100 + spot.pop;
+
+      if (!current || nextSeverity > currentSeverity) {
+        regions.set(spot.label, spot);
+      }
+    });
+
+  return center ? [center, ...regions.values()] : [...regions.values()];
+}
+
 async function fetchSpot(location: SavedLocation, sample: (typeof MAP_SAMPLES)[number], index: number) {
   const latitude = location.latitude + sample.lat;
   const longitude = location.longitude + sample.lon;
+  const districtPromise = reverseGeocodeDistrict(latitude, longitude);
   const url = new URL("https://api.open-meteo.com/v1/forecast");
   url.searchParams.set("latitude", String(latitude));
   url.searchParams.set("longitude", String(longitude));
@@ -460,10 +483,11 @@ async function fetchSpot(location: SavedLocation, sample: (typeof MAP_SAMPLES)[n
   if (!hourly?.time?.length) throw new Error("지도용 예보 데이터가 비어 있습니다.");
 
   const slot = makeSlot(hourly, Math.min(index, hourly.time.length - 1));
+  const district = await districtPromise;
 
   return {
     id: sample.id,
-    label: sample.label,
+    label: district ?? sample.label,
     latitude,
     longitude,
     x: sample.x,
@@ -484,34 +508,46 @@ async function fetchPrecipitationMap(
     const spots = await Promise.all(
       MAP_SAMPLES.map((sample) => fetchSpot(location, sample, index)),
     );
+    const regionSpots = dedupeRegionSpots(spots);
 
     return {
-      source: "Open-Meteo 주변 좌표 샘플",
-      maxPop: Math.max(...spots.map((spot) => spot.pop)),
-      maxPrecipitation: Math.max(...spots.map((spot) => spot.precipitation)),
-      spots,
+      source: "Open-Meteo 주변 지역 대표 좌표",
+      maxPop: Math.max(...regionSpots.map((spot) => spot.pop)),
+      maxPrecipitation: Math.max(
+        ...regionSpots.map((spot) => spot.precipitation),
+      ),
+      spots: regionSpots,
     };
   } catch {
-    const fallbackSpots = MAP_SAMPLES.map((sample) => ({
-      id: sample.id,
-      label: sample.label,
-      latitude: location.latitude + sample.lat,
-      longitude: location.longitude + sample.lon,
-      x: sample.x,
-      y: sample.y,
-      pop: 0,
-      temp: 0,
-      precipitation: 0,
-      sky: "확인 중",
-      type: "없음",
-      windDirection: 0,
-    }));
+    const fallbackSpots = await Promise.all(
+      MAP_SAMPLES.map(async (sample) => {
+        const latitude = location.latitude + sample.lat;
+        const longitude = location.longitude + sample.lon;
+
+        return {
+          id: sample.id,
+          label:
+            (await reverseGeocodeDistrict(latitude, longitude)) ?? sample.label,
+          latitude,
+          longitude,
+          x: sample.x,
+          y: sample.y,
+          pop: 0,
+          temp: 0,
+          precipitation: 0,
+          sky: "확인 중",
+          type: "없음",
+          windDirection: 0,
+        };
+      }),
+    );
+    const regionSpots = dedupeRegionSpots(fallbackSpots);
 
     return {
-      source: "Open-Meteo 주변 좌표 샘플",
+      source: "Open-Meteo 주변 지역 대표 좌표",
       maxPop: 0,
       maxPrecipitation: 0,
-      spots: fallbackSpots,
+      spots: regionSpots,
     };
   }
 }

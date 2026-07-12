@@ -92,12 +92,12 @@ const workflowSteps = [
     detail: "저장된 좌표로 오늘 예보 갱신",
   },
   {
-    time: "07:58",
+    time: "06:30",
     title: "우산 판단",
     detail: "강수확률과 강수형태로 필요 여부 계산",
   },
   {
-    time: "08:00",
+    time: "06:30",
     title: "서버 자동 발송",
     detail: "Vercel Cron이 카카오톡 전송",
   },
@@ -441,7 +441,7 @@ export default function Home() {
             </div>
           </div>
           <div className="decision-notification">
-            <span>08:00 카카오톡 자동 알림</span>
+            <span>06:30 카카오톡 자동 알림</span>
             <strong>
               {weather.location.source === "saved" ? "내 위치 저장됨" : "기본 위치 사용 중"}
             </strong>

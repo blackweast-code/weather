@@ -4,6 +4,7 @@ import type {
   PrecipitationSpot,
   SavedLocation,
 } from "@/lib/weather";
+import { reverseGeocodeDistrict } from "@/lib/geocode";
 
 type KmaItem = {
   category: string;
@@ -74,6 +75,44 @@ const MAP_SAMPLES = [
   { id: "s", label: "남쪽 약 6km", lat: -0.06, lon: 0, x: 50, y: 81 },
   { id: "se", label: "남동 약 8km", lat: -0.055, lon: 0.07, x: 78, y: 76 },
 ];
+
+type MapSample = (typeof MAP_SAMPLES)[number];
+
+async function resolveMapSampleLabels(location: SavedLocation) {
+  return Promise.all(
+    MAP_SAMPLES.map(async (sample) => {
+      const latitude = location.latitude + sample.lat;
+      const longitude = location.longitude + sample.lon;
+      const district = await reverseGeocodeDistrict(latitude, longitude);
+
+      return {
+        ...sample,
+        label: district ?? sample.label,
+      };
+    }),
+  );
+}
+
+function dedupeRegionSpots(spots: PrecipitationSpot[]) {
+  const center = spots.find((spot) => spot.id === "c");
+  const regions = new Map<string, PrecipitationSpot>();
+
+  spots
+    .filter((spot) => spot.id !== "c" && spot.label !== center?.label)
+    .forEach((spot) => {
+      const current = regions.get(spot.label);
+      const currentSeverity = current
+        ? current.precipitation * 100 + current.pop
+        : -1;
+      const nextSeverity = spot.precipitation * 100 + spot.pop;
+
+      if (!current || nextSeverity > currentSeverity) {
+        regions.set(spot.label, spot);
+      }
+    });
+
+  return center ? [center, ...regions.values()] : [...regions.values()];
+}
 
 function kmaServiceKey() {
   const raw = process.env.KMA_SERVICE_KEY?.trim();
@@ -591,7 +630,7 @@ async function optionalKmaItems(fetcher: () => Promise<KmaItem[]>) {
 
 async function fetchKmaSpot(
   location: SavedLocation,
-  sample: (typeof MAP_SAMPLES)[number],
+  sample: MapSample,
 ): Promise<PrecipitationSpot> {
   const latitude = location.latitude + sample.lat;
   const longitude = location.longitude + sample.lon;
@@ -625,24 +664,27 @@ async function fetchKmaSpot(
 async function fetchKmaPrecipitationMap(
   location: SavedLocation,
 ): Promise<PrecipitationMap> {
-  const spots = await Promise.all(
-    MAP_SAMPLES.map((sample) => fetchKmaSpot(location, sample)),
+  const samples = await resolveMapSampleLabels(location);
+  const allSpots = await Promise.all(
+    samples.map((sample) => fetchKmaSpot(location, sample)),
   );
+  const spots = dedupeRegionSpots(allSpots);
 
   return {
-    source: "기상청 초단기 주변 격자",
+    source: "기상청 주변 지역 대표 격자",
     maxPop: Math.max(...spots.map((spot) => spot.pop)),
     maxPrecipitation: Math.max(...spots.map((spot) => spot.precipitation)),
     spots,
   };
 }
 
-function fallbackKmaPrecipitationMap(
+async function fallbackKmaPrecipitationMap(
   location: SavedLocation,
   hourly: ForecastSlot[],
-): PrecipitationMap {
+): Promise<PrecipitationMap> {
   const slot = hourly[0];
-  const spots = MAP_SAMPLES.map((sample) => ({
+  const samples = await resolveMapSampleLabels(location);
+  const allSpots = samples.map((sample) => ({
     id: sample.id,
     label: sample.label,
     latitude: location.latitude + sample.lat,
@@ -655,9 +697,10 @@ function fallbackKmaPrecipitationMap(
     sky: slot?.sky ?? "확인 중",
     type: slot?.type ?? "없음",
   }));
+  const spots = dedupeRegionSpots(allSpots);
 
   return {
-    source: "기상청 현재 격자 기준",
+    source: "기상청 주변 지역 대표 격자",
     maxPop: Math.max(...spots.map((spot) => spot.pop)),
     maxPrecipitation: Math.max(...spots.map((spot) => spot.precipitation)),
     spots,
