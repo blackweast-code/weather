@@ -2,6 +2,7 @@
 
 import type { CSSProperties } from "react";
 import { useEffect, useRef, useState } from "react";
+import InteractiveWeatherMap from "./InteractiveWeatherMap";
 
 type ForecastSlot = {
   time: string;
@@ -152,28 +153,6 @@ function barPercent(value: number, max: number) {
   return `${Math.min(100, Math.max(8, (value / max) * 100))}%`;
 }
 
-function rainIntensity(spot: PrecipitationSpot) {
-  if (spot.precipitation >= 3 || spot.pop >= 70) return "heavy";
-  if (spot.precipitation >= 1 || spot.pop >= 50) return "mid";
-  if (spot.pop >= 25) return "light";
-  return "clear";
-}
-
-function openStreetMapUrl(location: WeatherData["location"]) {
-  const lat = location.latitude;
-  const lon = location.longitude;
-  const latPad = 0.07;
-  const lonPad = 0.09;
-  const bbox = [
-    lon - lonPad,
-    lat - latPad,
-    lon + lonPad,
-    lat + latPad,
-  ].join(",");
-
-  return `https://www.openstreetmap.org/export/embed.html?bbox=${bbox}&layer=mapnik`;
-}
-
 function isMobileBrowser() {
   if (typeof window === "undefined" || typeof navigator === "undefined") {
     return false;
@@ -320,34 +299,37 @@ export default function Home() {
 
   useEffect(() => {
     const storedToken = window.localStorage.getItem("locationUpdateToken") ?? "";
-    setAdminToken(storedToken);
+    const startupTimer = window.setTimeout(() => {
+      setAdminToken(storedToken);
+      loadWeather()
+        .catch((loadError) => {
+          setError(
+            loadError instanceof Error
+              ? loadError.message
+              : "날씨 정보를 가져오지 못했습니다.",
+          );
+        })
+        .finally(() => {
+          if (storedToken && isMobileBrowser() && !autoRequested.current) {
+            autoRequested.current = true;
+            collectPhoneLocation("auto", storedToken);
+          } else if (storedToken) {
+            setSaveState({
+              status: "idle",
+              message:
+                "관리자 토큰은 저장되어 있지만 PC에서는 자동 위치 저장을 실행하지 않습니다. 휴대폰에서 열면 GPS 위치가 자동 저장됩니다.",
+            });
+          } else if (!storedToken) {
+            setSaveState({
+              status: "idle",
+              message:
+                "공개 열람 모드입니다. 관리자 토큰을 입력하면 이 휴대폰 위치를 자동으로 저장할 수 있습니다.",
+            });
+          }
+        });
+    }, 0);
 
-    loadWeather()
-      .catch((loadError) => {
-        setError(
-          loadError instanceof Error
-            ? loadError.message
-            : "날씨 정보를 가져오지 못했습니다.",
-        );
-      })
-      .finally(() => {
-        if (storedToken && isMobileBrowser() && !autoRequested.current) {
-          autoRequested.current = true;
-          collectPhoneLocation("auto", storedToken);
-        } else if (storedToken) {
-          setSaveState({
-            status: "idle",
-            message:
-              "관리자 토큰은 저장되어 있지만 PC에서는 자동 위치 저장을 실행하지 않습니다. 휴대폰에서 열면 GPS 위치가 자동 저장됩니다.",
-          });
-        } else if (!storedToken) {
-          setSaveState({
-            status: "idle",
-            message:
-              "공개 열람 모드입니다. 관리자 토큰을 입력하면 이 휴대폰 위치를 자동으로 저장할 수 있습니다.",
-          });
-        }
-      });
+    return () => window.clearTimeout(startupTimer);
     // This should run only once on page entry so the browser permission prompt
     // does not keep reappearing during normal state updates.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -387,11 +369,10 @@ export default function Home() {
         >
           <div className="decision-header">
             <span className="status-badge">{weather.decision.label}</span>
-            <span className="level">Level {weather.decision.level}</span>
+            <span className="umbrella-symbol" aria-hidden="true">☂</span>
           </div>
           <h2>{weather.decision.title}</h2>
           <p className="summary">{weather.decision.summary}</p>
-          <p className="detail">{weather.decision.detail}</p>
 
           <div className="metric-grid" aria-label="오늘 날씨 요약">
             <div>
@@ -407,6 +388,12 @@ export default function Home() {
               <strong>{weather.maxPop}%</strong>
             </div>
           </div>
+          <div className="decision-notification">
+            <span>08:00 카카오톡 자동 알림</span>
+            <strong>
+              {weather.location.source === "saved" ? "내 위치 저장됨" : "기본 위치 사용 중"}
+            </strong>
+          </div>
         </article>
 
         <article className="weather-map card">
@@ -417,55 +404,27 @@ export default function Home() {
             </div>
             <span className="freshness">{weather.precipitationMap.source}</span>
           </div>
-          <div className="map-canvas">
-            <iframe
-              aria-label={`${weather.location.label} 주변 지도`}
-              loading="lazy"
-              src={openStreetMapUrl(weather.location)}
-              title="현재 위치 주변 지도"
-            />
-            <div className="rain-overlay" aria-hidden="true" />
-            {weather.precipitationMap.spots.map((spot) => (
-              <div
-                className={`rain-spot ${rainIntensity(spot)} ${
-                  spot.id === "c" ? "current" : ""
-                }`}
-                key={spot.id}
-                style={
-                  {
-                    "--x": `${spot.x}%`,
-                    "--y": `${spot.y}%`,
-                  } as CSSProperties
-                }
-              >
-                <strong>{spot.label}</strong>
-                <span>{spot.precipitation.toFixed(1)}mm</span>
-                <small>{spot.pop}%</small>
-              </div>
-            ))}
-            <div className="current-location-pin" aria-label="내 정확한 위치">
-              <span />
-              <strong>내 위치</strong>
-            </div>
-          </div>
+          <InteractiveWeatherMap
+            condition={
+              weather.hourly[0]
+                ? timelineMetric(weather.hourly[0], "weather")
+                : "예보 확인 중"
+            }
+            high={weather.high}
+            key={`${weather.location.latitude}-${weather.location.longitude}`}
+            location={weather.location}
+            low={weather.low}
+            maxPop={weather.maxPop}
+            precipitation={weather.hourly[0]?.precipitation ?? 0}
+            source={weather.precipitationMap.source}
+            spots={weather.precipitationMap.spots}
+            temperature={weather.hourly[0]?.temp ?? weather.high}
+          />
           <div className="map-legend">
             <span>0mm</span>
             <span>1mm+</span>
             <span>3mm+</span>
             <strong>최대 {weather.precipitationMap.maxPop}%</strong>
-          </div>
-          <div className="message-preview">
-            <span>카카오톡 알림</span>
-            <strong>Vercel Cron 자동 발송</strong>
-            <p>{weather.decision.message}</p>
-            <div className="playmcp-status">
-              <span className="ready">서버 발송 경로 준비됨</span>
-              <span className={weather.location.source === "saved" ? "ready" : ""}>
-                {weather.location.source === "saved"
-                  ? "자동 위치 저장됨"
-                  : "위치 권한 대기 중"}
-              </span>
-            </div>
           </div>
         </article>
       </section>
@@ -608,37 +567,18 @@ export default function Home() {
                   </div>
                   <time>{displayTime}</time>
                   <small>{timelineMetric(slot, timelineMode)}</small>
-                  <em>{slot.pop}%</em>
+                  <div className="forecast-micro-grid">
+                    <span><b>강수</b>{slot.pop}%</span>
+                    <span><b>강수량</b>{slot.precipitation.toFixed(1)}mm</span>
+                    <span><b>습도</b>{slot.humidity}%</span>
+                    <span><b>바람</b>{slot.wind}m/s</span>
+                  </div>
                 </div>
               );
             })}
           </div>
         </article>
 
-        <article className="card reasons-card">
-          <p className="section-kicker">판단 근거</p>
-          <h2>Decision Engine</h2>
-          <ul>
-            {weather.decision.reasons.map((reason) => (
-              <li key={reason}>{reason}</li>
-            ))}
-          </ul>
-          <div className="coordinate-note">
-            <span>좌표</span>
-            <strong>
-              {weather.location.latitude.toFixed(4)},{" "}
-              {weather.location.longitude.toFixed(4)}
-            </strong>
-          </div>
-          <div className="coordinate-note">
-            <span>데이터 출처</span>
-            <strong>{weather.sourceInfo.weather}</strong>
-            <small>
-              주소 {weather.sourceInfo.address} · 지도 {weather.sourceInfo.map}
-            </small>
-            <small>{weather.sourceInfo.koreaRecommendation}</small>
-          </div>
-        </article>
       </section>
 
       <section className="workflow-band" aria-label="카카오톡 자동화 흐름">

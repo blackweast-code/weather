@@ -16,6 +16,13 @@ npm run dev
 npm run build
 ```
 
+## Interactive map
+
+Set `NEXT_PUBLIC_KAKAO_JAVASCRIPT_KEY` in `.env.local` to use Kakao Maps. Add
+the local and deployed site domains under Kakao Developers > Platform > Web.
+When the key is omitted, the same drag, wheel zoom, precipitation marker, and
+current-location controls run on the OpenStreetMap fallback.
+
 This starter does not use `wrangler.jsonc`.
 
 ## Included Shape
