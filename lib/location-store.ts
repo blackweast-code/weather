@@ -128,6 +128,13 @@ export function withResolvedAddress(
 ) {
   if (!address) return location;
 
+  if (location.addressSource === "manual") {
+    return {
+      ...location,
+      locality: address.locality,
+    };
+  }
+
   const isGenericLabel =
     location.label === "내 휴대폰 위치" || location.label === DEFAULT_LOCATION.label;
   const looksLikeAddressLabel = /(?:시|군|구|읍|면|동|로|길)(?:\s|$|\d)/.test(

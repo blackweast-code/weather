@@ -25,6 +25,15 @@ function requestUpdateToken(request: Request) {
   return request.headers.get("x-location-update-token")?.trim() ?? "";
 }
 
+function manualRoadAddress(payload: LocationPayload) {
+  if (payload.updateMode !== "manual" || typeof payload.label !== "string") {
+    return "";
+  }
+
+  const label = payload.label.trim();
+  return /(?:로|길)\s*\d/.test(label) ? label : "";
+}
+
 function distanceMeters(
   left: { latitude: number; longitude: number },
   right: { latitude: number; longitude: number },
@@ -85,10 +94,12 @@ export async function POST(request: Request) {
 
   const currentLocation = await getLocation(request);
   const isAutoUpdate = payload.updateMode !== "manual";
+  const verifiedManualAddress = manualRoadAddress(payload);
 
   if (
     typeof location.accuracy === "number" &&
-    location.accuracy > MAX_LOCATION_ACCURACY_METERS
+    location.accuracy > MAX_LOCATION_ACCURACY_METERS &&
+    !verifiedManualAddress
   ) {
     return Response.json(
       {
@@ -120,7 +131,15 @@ export async function POST(request: Request) {
   }
 
   const resolvedAddress = await reverseGeocode(location.latitude, location.longitude);
-  const resolvedLocation = withResolvedAddress(location, resolvedAddress);
+  const automaticallyResolvedLocation = withResolvedAddress(location, resolvedAddress);
+  const resolvedLocation = verifiedManualAddress
+    ? {
+        ...automaticallyResolvedLocation,
+        label: verifiedManualAddress,
+        address: verifiedManualAddress,
+        addressSource: "manual",
+      }
+    : automaticallyResolvedLocation;
 
   const storage = await saveLocation(resolvedLocation);
 
