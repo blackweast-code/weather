@@ -39,6 +39,10 @@ type KakaoAddressResponse = {
   documents?: KakaoAddressDocument[];
 };
 
+type KakaoAddressSearchResponse = {
+  documents?: KakaoAddressDocument[];
+};
+
 type NominatimAddress = {
   city?: string;
   town?: string;
@@ -95,6 +99,25 @@ async function kakaoLocalFetch<T>(
   return (await response.json()) as T;
 }
 
+async function kakaoAddressSearch(query: string) {
+  const key = kakaoRestApiKey();
+  if (!key) return null;
+
+  const url = new URL("https://dapi.kakao.com/v2/local/search/address.json");
+  url.searchParams.set("query", query);
+
+  const response = await fetch(url, {
+    headers: {
+      Authorization: `KakaoAK ${key}`,
+    },
+    cache: "no-store",
+  });
+
+  if (!response.ok) return null;
+
+  return (await response.json()) as KakaoAddressSearchResponse;
+}
+
 async function reverseGeocodeWithKakao(
   latitude: number,
   longitude: number,
@@ -117,8 +140,15 @@ async function reverseGeocodeWithKakao(
     ]
       .filter(Boolean)
       .join(" ");
-    const roadAddress = addressDocument?.road_address;
+    let roadAddress = addressDocument?.road_address;
     const landAddress = addressDocument?.address;
+
+    if (!roadAddress?.address_name && landAddress?.address_name) {
+      const addressSearchData = await kakaoAddressSearch(landAddress.address_name);
+      roadAddress = addressSearchData?.documents?.find(
+        (document) => document.road_address?.address_name,
+      )?.road_address;
+    }
     const roadLocality = [
       roadAddress?.region_1depth_name,
       roadAddress?.region_2depth_name,
