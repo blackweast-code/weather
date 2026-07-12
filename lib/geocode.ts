@@ -18,6 +18,9 @@ type KakaoRegionResponse = {
 };
 
 type KakaoAddressDocument = {
+  address_type?: string;
+  x?: string;
+  y?: string;
   address?: {
     address_name?: string;
     region_1depth_name?: string;
@@ -202,6 +205,24 @@ export async function reverseGeocodeDistrict(
       region?.region_1depth_name,
       region?.region_3depth_name,
     ) ?? null;
+  } catch {
+    return null;
+  }
+}
+
+export async function resolveDistrictCenter(query: string) {
+  try {
+    const addressSearchData = await kakaoAddressSearch(query);
+    const document =
+      addressSearchData?.documents?.find(
+        (candidate) => candidate.address_type === "REGION",
+      ) ?? addressSearchData?.documents?.[0];
+    const latitude = Number(document?.y);
+    const longitude = Number(document?.x);
+
+    if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) return null;
+
+    return { latitude, longitude };
   } catch {
     return null;
   }

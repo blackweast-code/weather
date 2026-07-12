@@ -493,7 +493,7 @@ h3 {
   color: #ffffff;
   display: grid;
   gap: 2px;
-  min-width: 82px;
+  min-width: 108px;
   padding: 7px 9px;
   pointer-events: none;
   text-align: center;
@@ -518,6 +518,11 @@ h3 {
 .map-rain-marker small {
   color: rgba(255, 255, 255, 0.82);
   font-size: 0.67rem;
+}
+
+.map-rain-marker .rain-time {
+  color: #ffe27a;
+  font-weight: 800;
 }
 
 .map-rain-marker.light {

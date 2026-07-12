@@ -16,6 +16,9 @@ type MapSpot = {
   longitude: number;
   pop: number;
   precipitation: number;
+  rainEnd?: string;
+  rainStart?: string;
+  temp: number;
 };
 
 type InteractiveWeatherMapProps = {
@@ -121,18 +124,37 @@ function spotIntensity(spot: MapSpot) {
   return "clear";
 }
 
+function shortHour(time?: string) {
+  if (!time) return "";
+
+  const hour = Number(time.slice(0, 2));
+  return Number.isFinite(hour) ? `${hour}시` : time;
+}
+
+function rainTimeLabel(spot: MapSpot) {
+  if (!spot.rainStart) return "비 예상 없음";
+
+  const end = shortHour(spot.rainEnd);
+  return end
+    ? `비 ${shortHour(spot.rainStart)}~${end}`
+    : `비 ${shortHour(spot.rainStart)}부터`;
+}
+
 function buildSpotElement(spot: MapSpot) {
   const element = document.createElement("div");
   element.className = `map-rain-marker ${spotIntensity(spot)}`;
 
   const label = document.createElement("strong");
   label.textContent = spot.label;
-  const amount = document.createElement("span");
-  amount.textContent = `${spot.precipitation.toFixed(1)}mm`;
+  const temperature = document.createElement("span");
+  temperature.textContent = `${spot.temp}°`;
   const probability = document.createElement("small");
-  probability.textContent = `강수 ${spot.pop}%`;
+  probability.textContent = `강수 최대 ${spot.pop}% · ${spot.precipitation.toFixed(1)}mm`;
+  const rainTime = document.createElement("small");
+  rainTime.className = "rain-time";
+  rainTime.textContent = rainTimeLabel(spot);
 
-  element.append(label, amount, probability);
+  element.append(label, temperature, probability, rainTime);
   return element;
 }
 
@@ -344,8 +366,11 @@ function OpenStreetMap({
               style={{ left: position.left, top: position.top }}
             >
               <strong>{spot.label}</strong>
-              <span>{spot.precipitation.toFixed(1)}mm</span>
-              <small>강수 {spot.pop}%</small>
+              <span>{spot.temp}°</span>
+              <small>
+                강수 최대 {spot.pop}% · {spot.precipitation.toFixed(1)}mm
+              </small>
+              <small className="rain-time">{rainTimeLabel(spot)}</small>
             </div>
           );
         })}

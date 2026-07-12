@@ -37,6 +37,8 @@ export type PrecipitationSpot = {
   pop: number;
   temp: number;
   precipitation: number;
+  rainEnd?: string;
+  rainStart?: string;
   sky: string;
   type: string;
 };
@@ -172,6 +174,92 @@ function isWetSlot(slot: ForecastSlot) {
   );
 }
 
+function nextForecastHour(time: string) {
+  const hour = timeToHour(time);
+  if (hour === null) return time;
+
+  return `${String((hour + 1) % 24).padStart(2, "0")}:${time.slice(3, 5) || "00"}`;
+}
+
+function summarizeForecastRain(slots: ForecastSlot[]) {
+  const horizon = slots.slice(0, 14);
+  const maxPop = Math.max(0, ...horizon.map((slot) => slot.pop));
+  const maxPrecipitation = Math.max(
+    0,
+    ...horizon.map((slot) => slot.precipitation),
+  );
+  const periods: Array<{ end: string; start: string }> = [];
+
+  for (let index = 0; index < horizon.length; index += 1) {
+    const slot = horizon[index];
+    if (!isWetSlot(slot) && slot.pop < 40) continue;
+
+    const start = slot.time;
+    let lastRiskIndex = index;
+    while (lastRiskIndex + 1 < horizon.length) {
+      const nextSlot = horizon[lastRiskIndex + 1];
+      if (!isWetSlot(nextSlot) && nextSlot.pop < 40) break;
+      lastRiskIndex += 1;
+    }
+
+    periods.push({
+      start,
+      end: nextForecastHour(horizon[lastRiskIndex].time),
+    });
+    index = lastRiskIndex;
+  }
+
+  return { maxPop, maxPrecipitation, periods };
+}
+
+function describeRainWindow(slots: ForecastSlot[]) {
+  const summary = summarizeForecastRain(slots);
+  const firstPeriod = summary.periods[0];
+
+  if (!firstPeriod) return "비 예상: 없음";
+
+  const extra = summary.periods.length > 1
+    ? ` 외 ${summary.periods.length - 1}회`
+    : "";
+
+  return `비 예상: ${formatKoreanHour(firstPeriod.start)}~${formatKoreanHour(
+    firstPeriod.end,
+  )}${extra}`;
+}
+
+function formatLocationUpdate(location: SavedLocation) {
+  if (!location.updatedAt) return "기본 위치";
+
+  const date = new Date(location.updatedAt);
+  if (Number.isNaN(date.getTime())) return "갱신 시각 확인 불가";
+
+  return new Intl.DateTimeFormat("ko-KR", {
+    timeZone: "Asia/Seoul",
+    month: "numeric",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  }).format(date);
+}
+
+function buildAlertMessage(
+  location: SavedLocation,
+  judgment: string,
+  forecast: ForecastSlot[],
+  hourly: ForecastSlot[],
+) {
+  const rainSummary = summarizeForecastRain(hourly);
+  const high = Math.max(...forecast.map((slot) => slot.temp));
+  const low = Math.min(...forecast.map((slot) => slot.temp));
+
+  return `[오늘의 우산 알림]\n지역: ${location.label}\n판단: ${judgment}\n${describeRainWindow(
+    hourly,
+  )}\n최대 강수 ${rainSummary.maxPop}% · ${rainSummary.maxPrecipitation.toFixed(
+    1,
+  )}mm / 기온 ${low}~${high}°C\n위치 갱신: ${formatLocationUpdate(location)}`;
+}
+
 function rainDetail(slot: ForecastSlot) {
   const amount = slot.precipitation > 0 ? `, 예상 ${slot.amount}` : "";
   const type = slot.type !== "없음" ? `${slot.type} ` : "";
@@ -289,7 +377,12 @@ function decideUmbrella(
         `예상 강수량 ${firstWet.amount}`,
         afternoonRain,
       ],
-      message: `[오늘의 우산 알림]\n지역: ${location.label}\n판단: 우산 필요\n${afternoonRain}\n최고 ${Math.max(...forecast.map((slot) => slot.temp))}°C / 최저 ${Math.min(...forecast.map((slot) => slot.temp))}°C / 강수확률 최대 ${maxPop}%`,
+      message: buildAlertMessage(
+        location,
+        "우산 필요",
+        forecast,
+        hourly,
+      ),
     };
   }
 
@@ -308,7 +401,12 @@ function decideUmbrella(
         commuteRisk ? "출퇴근 시간대 강수 가능성 있음" : "불확실성 기준 적용",
         afternoonRain,
       ],
-      message: `[오늘의 우산 알림]\n지역: ${location.label}\n판단: 우산 권장\n${afternoonRain}\n휴대용 우산을 챙기면 좋아요. 최대 ${maxPop}%`,
+      message: buildAlertMessage(
+        location,
+        "휴대용 우산 권장",
+        forecast,
+        hourly,
+      ),
     };
   }
 
@@ -326,7 +424,12 @@ function decideUmbrella(
       "예상 강수량 0mm",
       afternoonRain,
     ],
-    message: `[오늘의 우산 알림]\n지역: ${location.label}\n판단: 우산 불필요\n${afternoonRain}\n최고 ${Math.max(...forecast.map((slot) => slot.temp))}°C / 최저 ${Math.min(...forecast.map((slot) => slot.temp))}°C`,
+    message: buildAlertMessage(
+      location,
+      "우산 불필요",
+      forecast,
+      hourly,
+    ),
   };
 }
 
@@ -482,7 +585,11 @@ async function fetchSpot(location: SavedLocation, sample: (typeof MAP_SAMPLES)[n
   const hourly = data.hourly;
   if (!hourly?.time?.length) throw new Error("지도용 예보 데이터가 비어 있습니다.");
 
-  const slot = makeSlot(hourly, Math.min(index, hourly.time.length - 1));
+  const slots = hourly.time
+    .map((_, slotIndex) => makeSlot(hourly, slotIndex))
+    .slice(index, index + 14);
+  const slot = slots[0] ?? makeSlot(hourly, Math.min(index, hourly.time.length - 1));
+  const rainSummary = summarizeForecastRain(slots);
   const district = await districtPromise;
 
   return {
@@ -492,9 +599,11 @@ async function fetchSpot(location: SavedLocation, sample: (typeof MAP_SAMPLES)[n
     longitude,
     x: sample.x,
     y: sample.y,
-    pop: slot.pop,
+    pop: rainSummary.maxPop,
     temp: slot.temp,
-    precipitation: slot.precipitation,
+    precipitation: rainSummary.maxPrecipitation,
+    rainStart: rainSummary.periods[0]?.start,
+    rainEnd: rainSummary.periods[0]?.end,
     sky: slot.sky,
     type: slot.type,
   };

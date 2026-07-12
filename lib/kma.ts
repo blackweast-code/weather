@@ -4,7 +4,10 @@ import type {
   PrecipitationSpot,
   SavedLocation,
 } from "@/lib/weather";
-import { reverseGeocodeDistrict } from "@/lib/geocode";
+import {
+  resolveDistrictCenter,
+  reverseGeocodeDistrict,
+} from "@/lib/geocode";
 
 type KmaItem = {
   category: string;
@@ -79,7 +82,7 @@ const MAP_SAMPLES = [
 type MapSample = (typeof MAP_SAMPLES)[number];
 
 async function resolveMapSampleLabels(location: SavedLocation) {
-  return Promise.all(
+  const labeledSamples = await Promise.all(
     MAP_SAMPLES.map(async (sample) => {
       const latitude = location.latitude + sample.lat;
       const longitude = location.longitude + sample.lon;
@@ -88,6 +91,30 @@ async function resolveMapSampleLabels(location: SavedLocation) {
       return {
         ...sample,
         label: district ?? sample.label,
+      };
+    }),
+  );
+  const center = labeledSamples.find((sample) => sample.id === "c");
+  const seen = new Set(center ? [center.label] : []);
+  const uniqueSamples = labeledSamples.filter((sample) => {
+    if (sample.id === "c") return true;
+    if (seen.has(sample.label)) return false;
+
+    seen.add(sample.label);
+    return true;
+  });
+
+  return Promise.all(
+    uniqueSamples.map(async (sample) => {
+      if (sample.id === "c") return sample;
+
+      const districtCenter = await resolveDistrictCenter(sample.label);
+      if (!districtCenter) return sample;
+
+      return {
+        ...sample,
+        lat: districtCenter.latitude - location.latitude,
+        lon: districtCenter.longitude - location.longitude,
       };
     }),
   );
@@ -112,6 +139,49 @@ function dedupeRegionSpots(spots: PrecipitationSpot[]) {
     });
 
   return center ? [center, ...regions.values()] : [...regions.values()];
+}
+
+function nextHour(time: string) {
+  const hour = Number(time.slice(0, 2));
+  if (!Number.isFinite(hour)) return time;
+
+  return `${String((hour + 1) % 24).padStart(2, "0")}:${time.slice(3, 5) || "00"}`;
+}
+
+function regionalForecastSummary(slots: ForecastSlot[]) {
+  const horizon = slots.slice(0, 14);
+  const maxPop = Math.max(0, ...horizon.map((slot) => slot.pop));
+  const maxPrecipitation = Math.max(
+    0,
+    ...horizon.map((slot) => slot.precipitation),
+  );
+  const firstRainIndex = horizon.findIndex(
+    (slot) => slot.type !== "없음" || slot.precipitation > 0 || slot.pop >= 40,
+  );
+
+  if (firstRainIndex === -1) {
+    return { maxPop, maxPrecipitation };
+  }
+
+  let lastRainIndex = firstRainIndex;
+  while (lastRainIndex + 1 < horizon.length) {
+    const nextSlot = horizon[lastRainIndex + 1];
+    if (
+      nextSlot.type === "없음" &&
+      nextSlot.precipitation <= 0 &&
+      nextSlot.pop < 40
+    ) {
+      break;
+    }
+    lastRainIndex += 1;
+  }
+
+  return {
+    maxPop,
+    maxPrecipitation,
+    rainStart: horizon[firstRainIndex].time,
+    rainEnd: nextHour(horizon[lastRainIndex].time),
+  };
 }
 
 function kmaServiceKey() {
@@ -634,17 +704,19 @@ async function fetchKmaSpot(
 ): Promise<PrecipitationSpot> {
   const latitude = location.latitude + sample.lat;
   const longitude = location.longitude + sample.lon;
-  const [ultraForecastItems, ultraNowcastItems] = await Promise.all([
+  const [villageItems, ultraForecastItems, ultraNowcastItems] = await Promise.all([
+    optionalKmaItems(() => fetchVillageItems(latitude, longitude)),
     optionalKmaItems(() => fetchUltraForecastItems(latitude, longitude)),
     optionalKmaItems(() => fetchUltraNowcastItems(latitude, longitude)),
   ]);
-  let slots = composeKmaSlots([], ultraForecastItems, ultraNowcastItems);
-
-  if (!slots.length) {
-    slots = composeKmaSlots(await fetchVillageItems(latitude, longitude));
-  }
+  const slots = composeKmaSlots(
+    villageItems,
+    ultraForecastItems,
+    ultraNowcastItems,
+  );
 
   const [slot] = slots;
+  const summary = regionalForecastSummary(slots);
 
   return {
     id: sample.id,
@@ -653,9 +725,11 @@ async function fetchKmaSpot(
     longitude,
     x: sample.x,
     y: sample.y,
-    pop: slot?.pop ?? 0,
+    pop: summary.maxPop,
     temp: slot?.temp ?? 0,
-    precipitation: slot?.precipitation ?? 0,
+    precipitation: summary.maxPrecipitation,
+    rainStart: summary.rainStart,
+    rainEnd: summary.rainEnd,
     sky: slot?.sky ?? "확인 중",
     type: slot?.type ?? "없음",
   };
@@ -671,7 +745,7 @@ async function fetchKmaPrecipitationMap(
   const spots = dedupeRegionSpots(allSpots);
 
   return {
-    source: "기상청 주변 지역 대표 격자",
+    source: "기상청 지역구 중심 대표 격자",
     maxPop: Math.max(...spots.map((spot) => spot.pop)),
     maxPrecipitation: Math.max(...spots.map((spot) => spot.precipitation)),
     spots,
@@ -683,6 +757,7 @@ async function fallbackKmaPrecipitationMap(
   hourly: ForecastSlot[],
 ): Promise<PrecipitationMap> {
   const slot = hourly[0];
+  const summary = regionalForecastSummary(hourly);
   const samples = await resolveMapSampleLabels(location);
   const allSpots = samples.map((sample) => ({
     id: sample.id,
@@ -691,16 +766,18 @@ async function fallbackKmaPrecipitationMap(
     longitude: location.longitude + sample.lon,
     x: sample.x,
     y: sample.y,
-    pop: slot?.pop ?? 0,
+    pop: summary.maxPop,
     temp: slot?.temp ?? 0,
-    precipitation: slot?.precipitation ?? 0,
+    precipitation: summary.maxPrecipitation,
+    rainStart: summary.rainStart,
+    rainEnd: summary.rainEnd,
     sky: slot?.sky ?? "확인 중",
     type: slot?.type ?? "없음",
   }));
   const spots = dedupeRegionSpots(allSpots);
 
   return {
-    source: "기상청 주변 지역 대표 격자",
+    source: "기상청 지역구 중심 대표 격자",
     maxPop: Math.max(...spots.map((spot) => spot.pop)),
     maxPrecipitation: Math.max(...spots.map((spot) => spot.precipitation)),
     spots,
