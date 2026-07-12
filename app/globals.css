@@ -590,7 +590,7 @@ h3 {
   grid-template-columns: auto minmax(0, 1fr);
   left: 14px;
   padding: 13px 14px;
-  pointer-events: none;
+  pointer-events: auto;
   position: absolute;
   top: 14px;
   width: min(310px, calc(100% - 92px));
@@ -656,6 +656,37 @@ h3 {
   font-weight: 800;
   margin: 0;
   white-space: nowrap;
+}
+
+.external-weather-links {
+  display: grid;
+  gap: 6px;
+  grid-column: 1 / -1;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.external-weather-links a {
+  align-items: center;
+  background: #03c75a;
+  border-radius: 7px;
+  color: #ffffff;
+  display: flex;
+  font-size: 0.69rem;
+  font-weight: 800;
+  gap: 4px;
+  justify-content: center;
+  min-height: 32px;
+  padding: 6px 8px;
+  text-align: center;
+}
+
+.external-weather-links a:hover {
+  filter: brightness(0.96);
+}
+
+.external-weather-links a.daum {
+  background: #fee500;
+  color: #191919;
 }
 
 .map-controls {

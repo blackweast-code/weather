@@ -382,6 +382,9 @@ export default function InteractiveWeatherMap({
   temperature,
 }: InteractiveWeatherMapProps) {
   const kakaoKey = process.env.NEXT_PUBLIC_KAKAO_JAVASCRIPT_KEY?.trim();
+  const weatherSearchQuery = encodeURIComponent(`${location.label} 날씨`);
+  const naverWeatherUrl = `https://search.naver.com/search.naver?query=${weatherSearchQuery}`;
+  const daumWeatherUrl = `https://search.daum.net/search?w=tot&q=${weatherSearchQuery}`;
   const kakaoContainerRef = useRef<HTMLDivElement>(null);
   const kakaoMapRef = useRef<KakaoMapInstance | null>(null);
   const overlaysRef = useRef<KakaoOverlay[]>([]);
@@ -583,6 +586,14 @@ export default function InteractiveWeatherMap({
             <dd>{high}° / {low}°</dd>
           </div>
         </dl>
+        <nav className="external-weather-links" aria-label="외부 날씨 서비스">
+          <a href={naverWeatherUrl} rel="noreferrer" target="_blank">
+            네이버 날씨 <span aria-hidden="true">↗</span>
+          </a>
+          <a className="daum" href={daumWeatherUrl} rel="noreferrer" target="_blank">
+            카카오·다음 날씨 <span aria-hidden="true">↗</span>
+          </a>
+        </nav>
       </section>
 
       <div className="map-controls" aria-label="지도 조작">
