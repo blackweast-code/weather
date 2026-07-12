@@ -1,4 +1,5 @@
 import { DEFAULT_LOCATION, type SavedLocation } from "@/lib/weather";
+import { reverseGeocode } from "@/lib/geocode";
 
 const LOCATION_COOKIE = "umbrella_location";
 const ONE_YEAR_SECONDS = 60 * 60 * 24 * 365;
@@ -245,18 +246,49 @@ async function saveLocationToPersistentStorage(location: SavedLocation) {
   return true;
 }
 
+async function refreshResolvedAddress(location: SavedLocation) {
+  const resolvedAddress = await reverseGeocode(
+    location.latitude,
+    location.longitude,
+  );
+
+  return withResolvedAddress(location, resolvedAddress);
+}
+
+function addressChanged(left: SavedLocation, right: SavedLocation) {
+  return (
+    left.label !== right.label ||
+    left.address !== right.address ||
+    left.addressSource !== right.addressSource ||
+    left.locality !== right.locality
+  );
+}
+
 export async function getLocation(request: Request): Promise<LocationLookup> {
   const queryLocation = locationFromQuery(request);
   if (queryLocation) {
-    return { location: queryLocation, persisted: true, storage: "query" };
+    return {
+      location: await refreshResolvedAddress(queryLocation),
+      persisted: true,
+      storage: "query",
+    };
   }
 
   const persistentLocation = await locationFromPersistentStorage();
   if (persistentLocation) {
-    globalLocation().__umbrellaLocation = persistentLocation;
+    const resolvedLocation = await refreshResolvedAddress(persistentLocation);
+    globalLocation().__umbrellaLocation = resolvedLocation;
+
+    if (addressChanged(persistentLocation, resolvedLocation)) {
+      try {
+        await saveLocationToPersistentStorage(resolvedLocation);
+      } catch {
+        // The refreshed address is still returned even if persistence is unavailable.
+      }
+    }
 
     return {
-      location: persistentLocation,
+      location: resolvedLocation,
       persisted: true,
       storage: "persistent",
     };
@@ -264,16 +296,28 @@ export async function getLocation(request: Request): Promise<LocationLookup> {
 
   const memoryLocation = globalLocation().__umbrellaLocation;
   if (memoryLocation) {
-    return { location: memoryLocation, persisted: true, storage: "memory" };
+    const resolvedLocation = await refreshResolvedAddress(memoryLocation);
+    globalLocation().__umbrellaLocation = resolvedLocation;
+    return { location: resolvedLocation, persisted: true, storage: "memory" };
   }
 
   const cookieLocation = locationFromCookie(request);
   if (cookieLocation) {
-    return { location: cookieLocation, persisted: true, storage: "cookie" };
+    return {
+      location: await refreshResolvedAddress(cookieLocation),
+      persisted: true,
+      storage: "cookie",
+    };
   }
 
   const envLocation = locationFromEnv();
-  if (envLocation) return { location: envLocation, persisted: true, storage: "env" };
+  if (envLocation) {
+    return {
+      location: await refreshResolvedAddress(envLocation),
+      persisted: true,
+      storage: "env",
+    };
+  }
 
   return {
     location: DEFAULT_LOCATION,

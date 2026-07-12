@@ -166,6 +166,60 @@ function isMobileBrowser() {
   return coarsePointer || mobileUserAgent;
 }
 
+const DESIRED_LOCATION_ACCURACY_METERS = 35;
+const LOCATION_SAMPLE_WINDOW_MS = 12000;
+
+function getPrecisePhonePosition() {
+  return new Promise<GeolocationPosition>((resolve, reject) => {
+    let bestPosition: GeolocationPosition | null = null;
+    let timerId: number | null = null;
+    let watchId: number | null = null;
+    let settled = false;
+
+    const stop = () => {
+      if (watchId !== null) navigator.geolocation.clearWatch(watchId);
+      if (timerId !== null) window.clearTimeout(timerId);
+    };
+    const succeed = (position: GeolocationPosition) => {
+      if (settled) return;
+      settled = true;
+      stop();
+      resolve(position);
+    };
+    const fail = (error: GeolocationPositionError | Error) => {
+      if (settled) return;
+      settled = true;
+      stop();
+      reject(error);
+    };
+
+    watchId = navigator.geolocation.watchPosition(
+      (position) => {
+        if (
+          !bestPosition ||
+          position.coords.accuracy < bestPosition.coords.accuracy
+        ) {
+          bestPosition = position;
+        }
+
+        if (position.coords.accuracy <= DESIRED_LOCATION_ACCURACY_METERS) {
+          succeed(position);
+        }
+      },
+      (error) => {
+        if (bestPosition) succeed(bestPosition);
+        else fail(error);
+      },
+      { enableHighAccuracy: true, maximumAge: 0, timeout: 20000 },
+    );
+
+    timerId = window.setTimeout(() => {
+      if (bestPosition) succeed(bestPosition);
+      else fail(new Error("정확한 휴대폰 위치를 확인하지 못했습니다."));
+    }, LOCATION_SAMPLE_WINDOW_MS);
+  });
+}
+
 export default function Home() {
   const [weather, setWeather] = useState<WeatherData | null>(null);
   const [error, setError] = useState("");
@@ -251,12 +305,12 @@ export default function Home() {
       status: "saving",
       message:
         mode === "auto"
-          ? "자동 위치 수집을 위해 브라우저 권한을 요청하는 중입니다."
-          : "휴대폰 위치 권한을 다시 요청하는 중입니다.",
+          ? "자동 위치 수집을 위해 휴대폰 GPS를 정밀 측정하는 중입니다."
+          : "정확한 도로명주소를 위해 휴대폰 GPS를 정밀 측정하는 중입니다.",
     });
 
-    navigator.geolocation.getCurrentPosition(
-      async (position) => {
+    getPrecisePhonePosition()
+      .then(async (position) => {
         try {
           const locationLabel = label.trim() || "내 휴대폰 위치";
           const savedLocation = await saveCoordinates(
@@ -285,16 +339,14 @@ export default function Home() {
                 : "위치 저장에 실패했습니다.",
           });
         }
-      },
-      () => {
+      })
+      .catch(() => {
         setSaveState({
           status: "error",
           message:
-            "위치 권한이 허용되지 않아 기본 위치를 사용합니다. 브라우저에서 위치 권한을 허용하면 자동 갱신됩니다.",
+            "정확한 위치를 확인하지 못했습니다. 휴대폰 GPS와 브라우저 위치 권한을 켜고 창가나 야외에서 다시 시도하세요.",
         });
-      },
-      { enableHighAccuracy: true, maximumAge: 60000, timeout: 20000 },
-    );
+      });
   }
 
   useEffect(() => {

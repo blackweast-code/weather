@@ -20,10 +20,18 @@ type KakaoRegionResponse = {
 type KakaoAddressDocument = {
   address?: {
     address_name?: string;
+    region_1depth_name?: string;
+    region_2depth_name?: string;
+    region_3depth_name?: string;
   };
   road_address?: {
     address_name?: string;
+    main_building_no?: string;
+    region_1depth_name?: string;
+    region_2depth_name?: string;
+    region_3depth_name?: string;
     road_name?: string;
+    sub_building_no?: string;
   };
 };
 
@@ -46,6 +54,7 @@ type NominatimAddress = {
   neighbourhood?: string;
   quarter?: string;
   road?: string;
+  house_number?: string;
 };
 
 type NominatimResponse = {
@@ -72,12 +81,13 @@ async function kakaoLocalFetch<T>(
   const url = new URL(`https://dapi.kakao.com/v2/local/geo/${endpoint}.json`);
   url.searchParams.set("x", String(longitude));
   url.searchParams.set("y", String(latitude));
+  url.searchParams.set("input_coord", "WGS84");
 
   const response = await fetch(url, {
     headers: {
       Authorization: `KakaoAK ${key}`,
     },
-    next: { revalidate: 60 * 60 * 24 },
+    cache: "no-store",
   });
 
   if (!response.ok) return null;
@@ -100,23 +110,38 @@ async function reverseGeocodeWithKakao(
       regionDocuments.find((document) => document.region_type === "H") ??
       regionDocuments[0];
     const addressDocument = addressData?.documents?.[0];
-    const locality = [
+    const administrativeLocality = [
       region?.region_1depth_name,
       region?.region_2depth_name,
       region?.region_3depth_name,
     ]
       .filter(Boolean)
       .join(" ");
+    const roadAddress = addressDocument?.road_address;
+    const landAddress = addressDocument?.address;
+    const roadLocality = [
+      roadAddress?.region_1depth_name,
+      roadAddress?.region_2depth_name,
+    ]
+      .filter(Boolean)
+      .join(" ");
+    const landLocality = [
+      landAddress?.region_1depth_name,
+      landAddress?.region_2depth_name,
+    ]
+      .filter(Boolean)
+      .join(" ");
+    const locality = roadLocality || landLocality || administrativeLocality;
     const address =
-      addressDocument?.road_address?.address_name ??
-      addressDocument?.address?.address_name ??
+      roadAddress?.address_name ??
+      landAddress?.address_name ??
       region?.address_name ??
       locality;
 
     if (!locality && !address) return null;
 
     return {
-      label: locality || address || "내 휴대폰 위치",
+      label: address || locality || "내 휴대폰 위치",
       address: address || locality || "내 휴대폰 위치",
       locality: locality || address || "내 휴대폰 위치",
       source: "Kakao Local API",
@@ -172,8 +197,14 @@ export async function reverseGeocode(
       address.quarter,
     );
     const road = firstValue(address.road);
+    const roadWithNumber = [road, firstValue(address.house_number)]
+      .filter(Boolean)
+      .join(" ");
     const locality = [city, district].filter(Boolean).join(" ");
-    const label = [city, district, road].filter(Boolean).slice(0, 3).join(" ");
+    const label = [city, district, roadWithNumber]
+      .filter(Boolean)
+      .slice(0, 3)
+      .join(" ");
 
     if (!label && !data.display_name) return null;
 

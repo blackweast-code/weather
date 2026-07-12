@@ -18,7 +18,7 @@ type LocationPayload = {
   updateMode?: "auto" | "manual";
 };
 
-const MAX_LOCATION_ACCURACY_METERS = 1500;
+const MAX_LOCATION_ACCURACY_METERS = 80;
 const MAX_AUTO_UPDATE_DISTANCE_METERS = 5000;
 
 function requestUpdateToken(request: Request) {
